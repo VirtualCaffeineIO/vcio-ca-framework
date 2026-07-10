@@ -1,0 +1,15 @@
+{
+  "@odata.type": "#microsoft.graph.countryNamedLocation",
+  "id": "cd8b2dae-bf22-5579-90a6-0c96663bcaa9",
+  "displayName": "VCIO-NL-AllowedCountries",
+  "createdDateTime": "2026-07-09T00:00:00.0000000Z",
+  "modifiedDateTime": "2026-07-09T00:00:00.0000000Z",
+  "deletedDateTime": null,
+  "countriesAndRegions@odata.type": "#Collection(String)",
+  "countriesAndRegions": [
+    "US"
+  ],
+  "includeUnknownCountriesAndRegions": false,
+  "countryLookupMethod@odata.type": "#microsoft.graph.countryLookupMethodType",
+  "countryLookupMethod": "clientIpAddress"
+}

@@ -1,0 +1,102 @@
+{
+  "@odata.type": "#microsoft.graph.androidManagedAppProtection",
+  "id": "9978346f-0afb-53fd-89dc-74ba3cce85eb",
+  "displayName": "VCIO-APP-Android-Baseline",
+  "description": "VCIO CA Framework companion MAM baseline (DPF Level 2). Required by CA202. Assign to All Users with the platform's VCIO-FLT-*-UnmanagedDevices filter (include) before its ring enables.",
+  "createdDateTime": "2026-07-09T00:00:00.0000000Z",
+  "lastModifiedDateTime": "2026-07-09T00:00:00.0000000Z",
+  "version": null,
+  "roleScopeTagIds": [
+    "0"
+  ],
+  "periodOfflineBeforeAccessCheck": "PT12H",
+  "periodOnlineBeforeAccessCheck": "PT30M",
+  "periodOfflineBeforeWipeIsEnforced": "P90D",
+  "allowedInboundDataTransferSources": "allApps",
+  "allowedOutboundDataTransferDestinations": "managedApps",
+  "allowedOutboundClipboardSharingLevel": "managedAppsWithPasteIn",
+  "organizationalCredentialsRequired": false,
+  "dataBackupBlocked": true,
+  "deviceComplianceRequired": false,
+  "managedBrowserToOpenLinksRequired": true,
+  "managedBrowser": "microsoftEdge",
+  "saveAsBlocked": true,
+  "allowedDataStorageLocations": [
+    "oneDriveForBusiness",
+    "sharePoint"
+  ],
+  "contactSyncBlocked": false,
+  "printBlocked": true,
+  "fingerprintBlocked": false,
+  "disableAppPinIfDevicePinIsSet": true,
+  "maximumPinRetries": 5,
+  "simplePinBlocked": true,
+  "minimumPinLength": 6,
+  "pinCharacterSet": "numeric",
+  "pinRequired": true,
+  "periodBeforePinReset": "PT0S",
+  "appActionIfUnableToAuthenticateUser": "block",
+  "isAssigned": false,
+  "encryptAppData": true,
+  "screenCaptureBlocked": false,
+  "disableAppEncryptionIfDeviceEncryptionIsEnabled": false,
+  "minimumRequiredPatchVersion": "0000-00-00",
+  "apps": [
+    {
+      "id": "com.microsoft.office.outlook.android",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.androidMobileAppIdentifier",
+        "packageId": "com.microsoft.office.outlook"
+      }
+    },
+    {
+      "id": "com.microsoft.teams.android",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.androidMobileAppIdentifier",
+        "packageId": "com.microsoft.teams"
+      }
+    },
+    {
+      "id": "com.microsoft.office.word.android",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.androidMobileAppIdentifier",
+        "packageId": "com.microsoft.office.word"
+      }
+    },
+    {
+      "id": "com.microsoft.office.excel.android",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.androidMobileAppIdentifier",
+        "packageId": "com.microsoft.office.excel"
+      }
+    },
+    {
+      "id": "com.microsoft.office.powerpoint.android",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.androidMobileAppIdentifier",
+        "packageId": "com.microsoft.office.powerpoint"
+      }
+    },
+    {
+      "id": "com.microsoft.skydrive.android",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.androidMobileAppIdentifier",
+        "packageId": "com.microsoft.skydrive"
+      }
+    },
+    {
+      "id": "com.microsoft.emmx.android",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.androidMobileAppIdentifier",
+        "packageId": "com.microsoft.emmx"
+      }
+    },
+    {
+      "id": "com.microsoft.office.onenote.android",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.androidMobileAppIdentifier",
+        "packageId": "com.microsoft.office.onenote"
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "displayName": "VCIO-FLT-iOS-UnmanagedDevices",
+  "platform": "iOSMobileApplicationManagement",
+  "id": "782a955c-13cb-5643-bd57-a379d6b644ab",
+  "description": "VCIO CA Framework: limits App Protection assignment to unmanaged devices. Assign APP policies to All Users with this filter (include mode).",
+  "rule": "app.deviceManagementType -eq \"Unmanaged\"",
+  "assignmentFilterManagementType": "apps",
+  "roleScopeTags": [
+    "0"
+  ]
+}

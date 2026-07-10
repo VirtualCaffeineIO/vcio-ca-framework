@@ -1,0 +1,29 @@
+{
+  "@odata.type": "#microsoft.graph.windowsManagedAppProtection",
+  "id": "baf121b3-d390-520e-a362-132cc832ee4c",
+  "displayName": "VCIO-APP-Windows-Edge-Baseline",
+  "description": "VCIO CA Framework companion Windows MAM (Edge) policy. Required by CA301. Assign to All Users, NO filter (Windows has no managed-app filters; MDM-enrolled devices yield to MDM, and CA301 targets unmanaged only).",
+  "createdDateTime": "2026-07-09T00:00:00.0000000Z",
+  "lastModifiedDateTime": "2026-07-09T00:00:00.0000000Z",
+  "version": null,
+  "roleScopeTagIds": [
+    "0"
+  ],
+  "periodOfflineBeforeAccessCheck": "PT12H",
+  "periodOfflineBeforeWipeIsEnforced": "P90D",
+  "allowedInboundDataTransferSources": "allApps",
+  "allowedOutboundClipboardTransferLevel": "none",
+  "allowedOutboundDataTransferDestinations": "none",
+  "appActionIfUnableToAuthenticateUser": "block",
+  "printBlocked": true,
+  "isAssigned": false,
+  "apps": [
+    {
+      "id": "com.microsoft.edge.windows",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.windowsAppIdentifier",
+        "windowsAppId": "com.microsoft.edge"
+      }
+    }
+  ]
+}

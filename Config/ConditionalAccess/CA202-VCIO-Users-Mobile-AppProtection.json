@@ -1,0 +1,106 @@
+{
+  "@odata.type": "#microsoft.graph.conditionalAccessPolicy",
+  "id": "1c8f86fc-46cb-5197-888f-cf86fdef315a",
+  "templateId": null,
+  "displayName": "CA202-VCIO-Users-Mobile-AppProtection",
+  "createdDateTime": "2026-07-09T00:00:00.0000000Z",
+  "modifiedDateTime": "2026-07-09T00:00:00.0000000Z",
+  "state@odata.type": "#microsoft.graph.conditionalAccessPolicyState",
+  "state": "enabledForReportingButNotEnforced",
+  "deletedDateTime": null,
+  "partialEnablementStrategy": null,
+  "conditions": {
+    "@odata.type": "#microsoft.graph.conditionalAccessConditionSet",
+    "userRiskLevels@odata.type": "#Collection(microsoft.graph.riskLevel)",
+    "userRiskLevels": [],
+    "signInRiskLevels@odata.type": "#Collection(microsoft.graph.riskLevel)",
+    "signInRiskLevels": [],
+    "clientAppTypes@odata.type": "#Collection(microsoft.graph.conditionalAccessClientApp)",
+    "clientAppTypes": [
+      "browser",
+      "mobileAppsAndDesktopClients"
+    ],
+    "platforms": {
+      "@odata.type": "#microsoft.graph.conditionalAccessPlatforms",
+      "includePlatforms@odata.type": "#Collection(microsoft.graph.conditionalAccessDevicePlatform)",
+      "includePlatforms": [
+        "android",
+        "iOS"
+      ],
+      "excludePlatforms@odata.type": "#Collection(microsoft.graph.conditionalAccessDevicePlatform)",
+      "excludePlatforms": []
+    },
+    "locations": null,
+    "times": null,
+    "deviceStates": null,
+    "devices": {
+      "@odata.type": "#microsoft.graph.conditionalAccessDevices",
+      "includeDeviceStates@odata.type": "#Collection(String)",
+      "includeDeviceStates": [],
+      "excludeDeviceStates@odata.type": "#Collection(String)",
+      "excludeDeviceStates": [],
+      "includeDevices@odata.type": "#Collection(String)",
+      "includeDevices": [],
+      "excludeDevices@odata.type": "#Collection(String)",
+      "excludeDevices": [],
+      "deviceFilter": {
+        "@odata.type": "#microsoft.graph.conditionalAccessFilter",
+        "mode@odata.type": "#microsoft.graph.filterMode",
+        "mode": "exclude",
+        "rule": "device.isCompliant -eq True -and device.deviceOwnership -eq \"Company\""
+      }
+    },
+    "clientApplications": null,
+    "agents": null,
+    "applications": {
+      "@odata.type": "#microsoft.graph.conditionalAccessApplications",
+      "includeApplications@odata.type": "#Collection(String)",
+      "includeApplications": [
+        "Office365"
+      ],
+      "excludeApplications@odata.type": "#Collection(String)",
+      "excludeApplications": [],
+      "includeUserActions@odata.type": "#Collection(String)",
+      "includeUserActions": [],
+      "includeAuthenticationContextClassReferences@odata.type": "#Collection(String)",
+      "includeAuthenticationContextClassReferences": [],
+      "applicationFilter": null
+    },
+    "users": {
+      "@odata.type": "#microsoft.graph.conditionalAccessUsers",
+      "includeUsers@odata.type": "#Collection(String)",
+      "includeUsers": [],
+      "excludeUsers@odata.type": "#Collection(String)",
+      "excludeUsers": [],
+      "includeGroups@odata.type": "#Collection(String)",
+      "includeGroups": [
+        "6c6a7c97-190e-57ee-8b2b-77f9542c5f47"
+      ],
+      "excludeGroups@odata.type": "#Collection(String)",
+      "excludeGroups": [
+        "07c1a51c-0c49-5590-af9c-8936fab2176b",
+        "26d4213e-2276-5421-967d-66a715256c21"
+      ],
+      "includeRoles@odata.type": "#Collection(String)",
+      "includeRoles": [],
+      "excludeRoles@odata.type": "#Collection(String)",
+      "excludeRoles": [],
+      "includeGuestsOrExternalUsers": null,
+      "excludeGuestsOrExternalUsers": null
+    }
+  },
+  "grantControls": {
+    "@odata.type": "#microsoft.graph.conditionalAccessGrantControls",
+    "operator": "OR",
+    "builtInControls@odata.type": "#Collection(microsoft.graph.conditionalAccessGrantControl)",
+    "builtInControls": [
+      "compliantApplication"
+    ],
+    "customAuthenticationFactors@odata.type": "#Collection(String)",
+    "customAuthenticationFactors": [],
+    "termsOfUse@odata.type": "#Collection(String)",
+    "termsOfUse": [],
+    "authenticationStrength": null
+  },
+  "sessionControls": null
+}

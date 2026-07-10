@@ -1,0 +1,105 @@
+{
+  "@odata.type": "#microsoft.graph.conditionalAccessPolicy",
+  "id": "077814d3-0fb5-59d7-abdd-b8423320e473",
+  "templateId": null,
+  "displayName": "CA802-VCIO-Ext-Fenced-APPNAME",
+  "createdDateTime": "2026-07-09T00:00:00.0000000Z",
+  "modifiedDateTime": "2026-07-09T00:00:00.0000000Z",
+  "state@odata.type": "#microsoft.graph.conditionalAccessPolicyState",
+  "state": "enabledForReportingButNotEnforced",
+  "deletedDateTime": null,
+  "partialEnablementStrategy": null,
+  "conditions": {
+    "@odata.type": "#microsoft.graph.conditionalAccessConditionSet",
+    "userRiskLevels@odata.type": "#Collection(microsoft.graph.riskLevel)",
+    "userRiskLevels": [],
+    "signInRiskLevels@odata.type": "#Collection(microsoft.graph.riskLevel)",
+    "signInRiskLevels": [],
+    "clientAppTypes@odata.type": "#Collection(microsoft.graph.conditionalAccessClientApp)",
+    "clientAppTypes": [
+      "all"
+    ],
+    "platforms": null,
+    "locations": {
+      "@odata.type": "#microsoft.graph.conditionalAccessLocations",
+      "includeLocations@odata.type": "#Collection(String)",
+      "includeLocations": [
+        "All"
+      ],
+      "excludeLocations@odata.type": "#Collection(String)",
+      "excludeLocations": [
+        "12fa63c0-b21d-5452-bc16-0f28ef152872"
+      ]
+    },
+    "times": null,
+    "deviceStates": null,
+    "devices": {
+      "@odata.type": "#microsoft.graph.conditionalAccessDevices",
+      "includeDeviceStates@odata.type": "#Collection(String)",
+      "includeDeviceStates": [],
+      "excludeDeviceStates@odata.type": "#Collection(String)",
+      "excludeDeviceStates": [],
+      "includeDevices@odata.type": "#Collection(String)",
+      "includeDevices": [],
+      "excludeDevices@odata.type": "#Collection(String)",
+      "excludeDevices": [],
+      "deviceFilter": {
+        "@odata.type": "#microsoft.graph.conditionalAccessFilter",
+        "mode@odata.type": "#microsoft.graph.filterMode",
+        "mode": "exclude",
+        "rule": "device.deviceOwnership -eq \"Company\" -or device.isCompliant -eq True"
+      }
+    },
+    "clientApplications": null,
+    "agents": null,
+    "applications": {
+      "@odata.type": "#microsoft.graph.conditionalAccessApplications",
+      "includeApplications@odata.type": "#Collection(String)",
+      "includeApplications": [
+        "REPLACE-WITH-APP-ID"
+      ],
+      "excludeApplications@odata.type": "#Collection(String)",
+      "excludeApplications": [],
+      "includeUserActions@odata.type": "#Collection(String)",
+      "includeUserActions": [],
+      "includeAuthenticationContextClassReferences@odata.type": "#Collection(String)",
+      "includeAuthenticationContextClassReferences": [],
+      "applicationFilter": null
+    },
+    "users": {
+      "@odata.type": "#microsoft.graph.conditionalAccessUsers",
+      "includeUsers@odata.type": "#Collection(String)",
+      "includeUsers": [],
+      "excludeUsers@odata.type": "#Collection(String)",
+      "excludeUsers": [],
+      "includeGroups@odata.type": "#Collection(String)",
+      "includeGroups": [
+        "6c6a7c97-190e-57ee-8b2b-77f9542c5f47"
+      ],
+      "excludeGroups@odata.type": "#Collection(String)",
+      "excludeGroups": [
+        "07c1a51c-0c49-5590-af9c-8936fab2176b"
+      ],
+      "includeRoles@odata.type": "#Collection(String)",
+      "includeRoles": [],
+      "excludeRoles@odata.type": "#Collection(String)",
+      "excludeRoles": [],
+      "includeGuestsOrExternalUsers": null,
+      "excludeGuestsOrExternalUsers": null
+    }
+  },
+  "grantControls": {
+    "@odata.type": "#microsoft.graph.conditionalAccessGrantControls",
+    "operator": "OR",
+    "builtInControls@odata.type": "#Collection(microsoft.graph.conditionalAccessGrantControl)",
+    "builtInControls": [
+      "block"
+    ],
+    "customAuthenticationFactors@odata.type": "#Collection(String)",
+    "customAuthenticationFactors": [],
+    "termsOfUse@odata.type": "#Collection(String)",
+    "termsOfUse": [],
+    "authenticationStrength": null
+  },
+  "sessionControls": null
+}

@@ -1,0 +1,90 @@
+{
+  "@odata.type": "#microsoft.graph.conditionalAccessPolicy",
+  "id": "2f4f74bc-71d4-51c4-be92-1d33aae361e7",
+  "templateId": null,
+  "displayName": "CA402-VCIO-Guests-SessionHygiene",
+  "createdDateTime": "2026-07-09T00:00:00.0000000Z",
+  "modifiedDateTime": "2026-07-09T00:00:00.0000000Z",
+  "state@odata.type": "#microsoft.graph.conditionalAccessPolicyState",
+  "state": "enabledForReportingButNotEnforced",
+  "deletedDateTime": null,
+  "partialEnablementStrategy": null,
+  "conditions": {
+    "@odata.type": "#microsoft.graph.conditionalAccessConditionSet",
+    "userRiskLevels@odata.type": "#Collection(microsoft.graph.riskLevel)",
+    "userRiskLevels": [],
+    "signInRiskLevels@odata.type": "#Collection(microsoft.graph.riskLevel)",
+    "signInRiskLevels": [],
+    "clientAppTypes@odata.type": "#Collection(microsoft.graph.conditionalAccessClientApp)",
+    "clientAppTypes": [
+      "all"
+    ],
+    "platforms": null,
+    "locations": null,
+    "times": null,
+    "deviceStates": null,
+    "devices": null,
+    "clientApplications": null,
+    "agents": null,
+    "applications": {
+      "@odata.type": "#microsoft.graph.conditionalAccessApplications",
+      "includeApplications@odata.type": "#Collection(String)",
+      "includeApplications": [
+        "All"
+      ],
+      "excludeApplications@odata.type": "#Collection(String)",
+      "excludeApplications": [],
+      "includeUserActions@odata.type": "#Collection(String)",
+      "includeUserActions": [],
+      "includeAuthenticationContextClassReferences@odata.type": "#Collection(String)",
+      "includeAuthenticationContextClassReferences": [],
+      "applicationFilter": null
+    },
+    "users": {
+      "@odata.type": "#microsoft.graph.conditionalAccessUsers",
+      "includeUsers@odata.type": "#Collection(String)",
+      "includeUsers": [],
+      "excludeUsers@odata.type": "#Collection(String)",
+      "excludeUsers": [],
+      "includeGroups@odata.type": "#Collection(String)",
+      "includeGroups": [],
+      "excludeGroups@odata.type": "#Collection(String)",
+      "excludeGroups": [
+        "07c1a51c-0c49-5590-af9c-8936fab2176b",
+        "5bdd998b-0dfd-501c-9dc9-56f0a3c0540b"
+      ],
+      "includeRoles@odata.type": "#Collection(String)",
+      "includeRoles": [],
+      "excludeRoles@odata.type": "#Collection(String)",
+      "excludeRoles": [],
+      "includeGuestsOrExternalUsers": {
+        "guestOrExternalUserTypes": "internalGuest,b2bCollaborationGuest,b2bCollaborationMember,b2bDirectConnectUser,otherExternalUser,serviceProvider",
+        "externalTenants": {
+          "@odata.type": "#microsoft.graph.conditionalAccessAllExternalTenants",
+          "membershipKind": "all"
+        }
+      },
+      "excludeGuestsOrExternalUsers": null
+    }
+  },
+  "grantControls": null,
+  "sessionControls": {
+    "@odata.type": "#microsoft.graph.conditionalAccessSessionControls",
+    "disableResilienceDefaults": null,
+    "cloudAppSecurity": null,
+    "signInFrequency": {
+      "value": 12,
+      "type": "hours",
+      "authenticationType": "primaryAndSecondaryAuthentication",
+      "frequencyInterval": "timeBased",
+      "isEnabled": true
+    },
+    "persistentBrowser": {
+      "mode": "never",
+      "isEnabled": true
+    },
+    "continuousAccessEvaluation": null,
+    "secureSignInSession": null,
+    "applicationEnforcedRestrictions": null
+  }
+}

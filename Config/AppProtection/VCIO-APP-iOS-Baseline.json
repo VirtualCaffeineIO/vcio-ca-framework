@@ -1,0 +1,101 @@
+{
+  "@odata.type": "#microsoft.graph.iosManagedAppProtection",
+  "id": "3397add4-408d-5165-a0b6-ceff6aedb253",
+  "displayName": "VCIO-APP-iOS-Baseline",
+  "description": "VCIO CA Framework companion MAM baseline (DPF Level 2). Required by CA202. Assign to All Users with the platform's VCIO-FLT-*-UnmanagedDevices filter (include) before its ring enables.",
+  "createdDateTime": "2026-07-09T00:00:00.0000000Z",
+  "lastModifiedDateTime": "2026-07-09T00:00:00.0000000Z",
+  "version": null,
+  "roleScopeTagIds": [
+    "0"
+  ],
+  "periodOfflineBeforeAccessCheck": "PT12H",
+  "periodOnlineBeforeAccessCheck": "PT30M",
+  "periodOfflineBeforeWipeIsEnforced": "P90D",
+  "allowedInboundDataTransferSources": "allApps",
+  "allowedOutboundDataTransferDestinations": "managedApps",
+  "allowedOutboundClipboardSharingLevel": "managedAppsWithPasteIn",
+  "organizationalCredentialsRequired": false,
+  "dataBackupBlocked": true,
+  "deviceComplianceRequired": false,
+  "managedBrowserToOpenLinksRequired": true,
+  "managedBrowser": "microsoftEdge",
+  "saveAsBlocked": true,
+  "allowedDataStorageLocations": [
+    "oneDriveForBusiness",
+    "sharePoint"
+  ],
+  "contactSyncBlocked": false,
+  "printBlocked": true,
+  "fingerprintBlocked": false,
+  "disableAppPinIfDevicePinIsSet": true,
+  "maximumPinRetries": 5,
+  "simplePinBlocked": true,
+  "minimumPinLength": 6,
+  "pinCharacterSet": "numeric",
+  "pinRequired": true,
+  "periodBeforePinReset": "PT0S",
+  "appActionIfUnableToAuthenticateUser": "block",
+  "isAssigned": false,
+  "appDataEncryptionType": "whenDeviceLocked",
+  "faceIdBlocked": false,
+  "thirdPartyKeyboardsBlocked": false,
+  "apps": [
+    {
+      "id": "com.microsoft.office.outlook.ios",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.iosMobileAppIdentifier",
+        "bundleId": "com.microsoft.office.outlook"
+      }
+    },
+    {
+      "id": "com.microsoft.skype.teams.ios",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.iosMobileAppIdentifier",
+        "bundleId": "com.microsoft.skype.teams"
+      }
+    },
+    {
+      "id": "com.microsoft.office.word.ios",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.iosMobileAppIdentifier",
+        "bundleId": "com.microsoft.office.word"
+      }
+    },
+    {
+      "id": "com.microsoft.office.excel.ios",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.iosMobileAppIdentifier",
+        "bundleId": "com.microsoft.office.excel"
+      }
+    },
+    {
+      "id": "com.microsoft.office.powerpoint.ios",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.iosMobileAppIdentifier",
+        "bundleId": "com.microsoft.office.powerpoint"
+      }
+    },
+    {
+      "id": "com.microsoft.skydrive.ios",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.iosMobileAppIdentifier",
+        "bundleId": "com.microsoft.skydrive"
+      }
+    },
+    {
+      "id": "com.microsoft.msedge.ios",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.iosMobileAppIdentifier",
+        "bundleId": "com.microsoft.msedge"
+      }
+    },
+    {
+      "id": "com.microsoft.onenote.ios",
+      "mobileAppIdentifier": {
+        "@odata.type": "#microsoft.graph.iosMobileAppIdentifier",
+        "bundleId": "com.microsoft.onenote"
+      }
+    }
+  ]
+}

@@ -1,0 +1,165 @@
+{
+  "TenantId": "a11a11a1-b2c3-0000-0000-000000000001",
+  "Objects": [
+    {
+      "DisplayName": "SG-CA-BreakGlass",
+      "Id": "07c1a51c-0c49-5590-af9c-8936fab2176b",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Users",
+      "Id": "6c6a7c97-190e-57ee-8b2b-77f9542c5f47",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-ServiceAccounts",
+      "Id": "c1ffc28f-736e-5ce3-821d-9d14f3d8be79",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA000",
+      "Id": "5659f058-e3f1-53b1-8484-bda2f3488a0b",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA001",
+      "Id": "f30bbd07-eaf8-59c2-b408-e4cbd1905d97",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA002",
+      "Id": "1e6b0cdf-9291-52c0-80bb-0a9b42b9d772",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA003",
+      "Id": "4f45f33a-c3f7-5272-86e3-690960019f56",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA004",
+      "Id": "901b1799-2b1f-5771-be8f-280455d2f99b",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA005",
+      "Id": "4c7715e8-c4eb-5c3d-a07f-2b3ce70f453c",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA006",
+      "Id": "f4c3b67c-292a-53fe-9d8f-d415a4ebad3d",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA100",
+      "Id": "590fcae9-6ff3-59f5-85b3-11db0e252abd",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA101",
+      "Id": "d80e610a-0eee-5703-9dbd-e0557768b5f4",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA102",
+      "Id": "3d4b84b7-b75b-5356-93ee-0665fa4c65f3",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA103",
+      "Id": "f453d5c1-1c0c-5027-8e23-1561b00a56f9",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA200",
+      "Id": "939e4ab5-a6b8-528e-a097-34338f068112",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA201",
+      "Id": "87621608-abc8-596d-afa5-233962542f73",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA202",
+      "Id": "26d4213e-2276-5421-967d-66a715256c21",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA203",
+      "Id": "eb6dec46-3f30-577e-b428-ad1f81c61d8f",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA204",
+      "Id": "599edfce-9d38-5f53-b1b2-69c2aca9d2a8",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA300",
+      "Id": "acce4cf7-5a99-5443-be06-e7cab20b999a",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA301",
+      "Id": "95b712db-8bd5-57a6-bccb-b916b308129f",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA400",
+      "Id": "c83b1117-ea6d-59c1-b18c-8b6ecf4905d3",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA401",
+      "Id": "1bb82813-2cc9-5775-8035-31a7082c4b32",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA402",
+      "Id": "5bdd998b-0dfd-501c-9dc9-56f0a3c0540b",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA403",
+      "Id": "f03d7c0b-8f8b-5d46-a2f7-7a1d92ffc26c",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA500",
+      "Id": "891717f6-ae20-5641-bee6-4e68d049896e",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA501",
+      "Id": "21d837ab-954d-5bd2-be6d-554a151b1d61",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA700",
+      "Id": "2ab7191e-9808-590a-8cad-af37a2fbee8c",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA701",
+      "Id": "bed2d59b-0118-549b-9857-75a6be08e857",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA702",
+      "Id": "831da847-11fa-5fa7-85cd-3b1044f532ee",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA703",
+      "Id": "5da229f8-bb72-5c31-86c2-f0a731733020",
+      "Type": "Group"
+    },
+    {
+      "DisplayName": "SG-CA-Excl-CA705",
+      "Id": "7f534226-8770-5837-9dbd-310cb6464013",
+      "Type": "Group"
+    }
+  ]
+}
