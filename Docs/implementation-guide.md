@@ -189,7 +189,7 @@ The import created structure; this phase gives it meaning. Work from the [deploy
 
 One mode per tenant. **Entra Connect sync accounts are never members of `SG-CA-ServiceAccounts`** — CA002 exempts them by role (A4), and if the customer wants them fenced it is a dedicated `CA500-VCIO-ServiceAccounts-IPFence-DirSync` instance on `SG-CA-SA-DirSync` carrying the Connect server's egress, which is a different scope from the application servers'.
 
-**D4a. Privileged and transition groups** — populate `SG-CA-Privileged` from a first run of `Tools/Compare-VcioPrivilegedScope.ps1 -Manifest <path>` (worksheet 15), and `SG-CA-Transition-Hybrid` if the tenant has a hybrid-joined population, with an EXIT date recorded in the manifest (worksheet 16).
+**D4a. Privileged and transition groups** — populate `SG-CA-Privileged` from a first run of `Tools/Compare-VcioPrivilegedScope.ps1 -Manifest <path>` (worksheet item 15), and `SG-CA-Transition-Hybrid` if the tenant has a hybrid-joined population, with an EXIT date recorded in the manifest (worksheet 16).
 
 **D5. Guest apps and Tier 0 additions** — adjust CA401's excluded apps and CA103's included apps per worksheet #7/#8.
 

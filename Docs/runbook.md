@@ -31,7 +31,7 @@ Rollback: every ring change is preceded by an IntuneManagement bulk export. Reve
 Every exclusion group ships empty and carries its rules in its own description field. The standing rules:
 
 1. **One group, one policy.** No exclusion group is referenced by two policies. The validator enforces this in the repo; the quarterly review enforces it in the tenant.
-2. **Named owner per group** (parameters worksheet #17). The owner answers one question at review: *why is each member still here?*
+2. **Named owner per group** (parameters worksheet #14). The owner answers one question at review: *why is each member still here?*
 3. **Quarterly access reviews** on every `SG-CA-Excl-*` group and on `SG-CA-ServiceAccounts`. Entra access reviews where licensed; a calendared manual review where not.
 4. **Alert on membership change.** Log Analytics alert on group-membership modifications for all framework groups — highest priority on `SG-CA-Excl-CA002` (the MFA catch-all) and `SG-CA-BreakGlass`.
 5. **Exceptions are time-boxed by default.** An exclusion without an expiry date in the review record is a finding, not a fact of life.

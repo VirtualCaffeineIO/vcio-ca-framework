@@ -94,7 +94,7 @@
     ]
   },
 
-  "_partnerTenants": "D5. GDAP partner tenants. Their MFA is home-tenant enforced and always trusted; compliant-device trust is the separate inbound cross-tenant setting (worksheet item 14). CA403 excludes serviceProvider; CA400, CA402 and CA103 still apply.",
+  "_partnerTenants": "D5. GDAP partner tenants. Their MFA is home-tenant enforced and always trusted; compliant-device trust is the separate inbound cross-tenant setting (worksheet item 14a). CA403 excludes serviceProvider; CA400, CA402 and CA103 still apply.",
   "partnerTenants": [
     { "tenantId": "00000000-0000-0000-0000-000000000000", "name": "VirtualCaffeine.io", "compliantDeviceTrustInbound": false }
   ]

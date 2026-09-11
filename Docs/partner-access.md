@@ -8,7 +8,7 @@ A managed-services partner reaching the customer tenant through GDAP is the deli
 
 Microsoft states this directly in the GDAP documentation — see [Partner security requirements](https://learn.microsoft.com/partner-center/security/partner-security-requirements) and the [GDAP overview](https://learn.microsoft.com/partner-center/customers/gdap-introduction). Treat a customer's "but do they have MFA?" as answered by the program, and put the evidence in the engagement record rather than trying to enforce it locally.
 
-**Compliant-device trust is a separate, non-default setting.** Whether a partner technician's device being compliant *in the partner tenant* counts as compliant *in the customer tenant* is the inbound cross-tenant access setting, and it is off unless someone turned it on. This is worksheet item 14. Without it, CA103's compliant-device half can never be satisfied by a partner device, no matter how well managed that device is — the customer tenant simply has no compliance signal for it.
+**Compliant-device trust is a separate, non-default setting.** Whether a partner technician's device being compliant *in the partner tenant* counts as compliant *in the customer tenant* is the inbound cross-tenant access setting, and it is off unless someone turned it on. This is worksheet item 14a. Without it, CA103's compliant-device half can never be satisfied by a partner device, no matter how well managed that device is — the customer tenant simply has no compliance signal for it.
 
 ## What the framework does
 
@@ -64,6 +64,6 @@ This is a customer decision, not ours, and it is a real one: either a documented
 ## Where this is referenced
 
 * CA403 (A5) — the `serviceProvider` exclusion this document justifies.
-* [deployment-parameters.md](deployment-parameters.md) item 12 (home-tenant MFA trust) and item 14 (inbound compliant-device trust).
+* [deployment-parameters.md](deployment-parameters.md) item 12 (home-tenant MFA trust) and item 14a (inbound compliant-device trust).
 * Ring 2 and Ring 3 gates — `PartnerSignInTest` in `Prereqs/Invoke-VcioCaPrereqs.ps1`.
 * `Deploy/manifest.example.json` — `partnerTenants`, `partnerAccessTests`.

@@ -6,7 +6,29 @@ Date-based versioning: `YYYY.M.R` (year, month, release-in-month).
 
 Closes the findings from the third external review pass. **Fresh deployment only** until the F2 upgrade test is recorded in [Docs/upgrade.md](Docs/upgrade.md).
 
-Finding numbers below are the section IDs of the 2026.9.1 work order (revision 3, from the ruled adjudication of 2026-09-11), which is the authoritative list this release was built against.
+### Closure map
+
+Work-order section → the external review finding it closes.
+
+| Work-order section | External finding |
+|---|---|
+| A1, C5 | **F2** — Company-or-compliant exemption |
+| A2 | **F3** — CA202 vs APP filter |
+| A3, B5, D1 | **F1** — Security Defaults migration (plus the device-code correction) |
+| A4 | Sync-account correction |
+| A5, D5 | CA403 service provider block (elevated to blocker) |
+| A6 | **F5** — risk policies |
+| A7, C3, F3 | **F8b** — CA601 inert |
+| A8, E1 | **F7** — admin coverage |
+| A9, C4 | **F8a** — CA801 redundant |
+| A10, C2, E2 | Hybrid-transition consequence of **F2** |
+| A11, A12, B3a, C6 | **F5** — per-system fencing |
+| B1–B4 | **F6** — prereq PASS is not a gate |
+| B4 (SPO/EXO), D3 | **F4** — AER unconfigured |
+| C1 | 37 vs 38 count |
+| D2 | CA003/CA004 not evaluated in report-only |
+| D6 | WHfB/PSSO under CA004 since 2026-07-06 |
+| F2, `Docs/upgrade.md` | Stable GUIDs do not establish upgrade |
 
 **Not lab-validated.** 2026.7.1 shipped after a full import into a live tenant. This release has not had one: F1 (device matrix), F2 (upgrade) and F3 (CA601 targeting and enforcement) all need a lab tenant, and F2 additionally needs Windows PowerShell 5.1 for IntuneManagement. Only F4 — both validators clean against the tree — has been run. Nothing here should be read as tenant-verified.
 
@@ -19,7 +41,12 @@ Finding numbers below are the section IDs of the 2026.9.1 work order (revision 3
 * **A5 — CA403 excludes service providers.** Blocking a GDAP partner technician from the admin portals breaks the engagement and pushes the customer toward a standing local admin account for the partner, which is worse than a governed GDAP relationship. Service providers remain governed by CA400, CA402, CA103 and their home tenant. New [Docs/partner-access.md](Docs/partner-access.md) carries the reasoning, the Ring 2 and Ring 3 tests, and the fallbacks — written down, not chosen.
 * **A6 — CA700 and CA701 no longer exclude service accounts.** They are blocks, not interactive challenges: there is nothing for a non-interactive account to fail to complete, and a compromised service account is precisely what "high risk" means. The exclusion was protecting the attacker. CA702 and CA703 keep it, because they demand MFA and a password change.
 * **A7 — CA601 gained an agent principal scope** (`clientApplications.includeAgentIdServicePrincipals: ["All"]`, exactly as CA600 has it). `agentIdRiskLevels` is a condition, not a scope; the policy had `includeUsers: ['None']` and no principals, which is the inert shape the validators exist to catch. Now enforced as rule C3.
-* **A8 — new core group `SG-CA-Privileged`**, included on CA100, CA101 and CA102 alongside the built-in roles. Role targeting is blind to custom directory roles, AU-scoped assignments and Azure RBAC entirely — an Owner at subscription scope is control-plane privilege that the 100s never saw. Ships empty; reconciled by the new E1 tool.
+* **A8 — new core group `SG-CA-Privileged`** (F7), included on CA100, CA101 and CA102 alongside the built-in roles. Role targeting is blind to custom directory roles, AU-scoped assignments and Azure RBAC entirely — an Owner at subscription scope is control-plane privilege that the 100s never saw. Ships empty; reconciled by the new E1 tool.
+* **`ADMIN_ROLES` corrected against Microsoft Learn** (F7). Every template ID and name in the list was re-verified 2026-09-11 against the [Entra built-in roles permissions reference](https://learn.microsoft.com/entra/identity/role-based-access-control/permissions-reference#all-roles). Three labels inherited from the 2026.6 community list were wrong:
+  * `e93e3737-fa85-474a-aee4-7d3fb86510f3` was labelled "Entra ID Backup Administrator". Learn lists it as **Dragon Administrator**, a product admin role carrying no privileged label. It is not Tier 0 and has been **removed** — a phishing-resistant-MFA-plus-compliant-device scope is not where a product admin role belongs. No replacement was added; the list is 24 roles → **23**.
+  * `b6a27b2b-f905-4b2e-81b5-0d90e0ef1fdb` was labelled "Windows 365 Administrator"; it is **Entra Backup Administrator**.
+  * `11451d60-acb2-45eb-a7d6-43d0f0125c13` was labelled "Windows Update Deployment Administrator"; it is **Windows 365 Administrator**.
+  The two corrected IDs were already in the list, so only the removal changes enforcement scope. CA100, CA101, CA102 and CA705 regenerated; no policy GUID moved. The list is duplicated in `Prereqs/Invoke-VcioCaPrereqs.ps1` and `Tools/Compare-VcioPrivilegedScope.ps1`, and both copies were corrected in step.
 * **A9 — CA801 is now the Tier 0 posture** (compliant device **AND** phishing-resistant MFA). The old Step-Up posture (compliant device *or* MFA) enforced nothing new for anyone inside CA002's MFA scope — MFA alone already satisfied it — so the slot is reused for the posture that was actually missing. Reusing it is deliberate; **retiring an old instance is a documented step, not a rename** ([Docs/upgrade.md](Docs/upgrade.md)). Redundancy of this shape is now caught by rule C4.
 * **A10 — the transition set.** New core group `SG-CA-Transition-Hybrid`, plus CA204-T, CA300-T and CA301-T alongside the existing CA200-T, all targeting that group with a filter that also admits hybrid-joined devices. Standard CA200, CA204, CA300 and CA301 now exclude it, so exactly one of each pair reaches a given user. Emptying the group is the exit. The exit **date** is not in the policy JSON: Graph documents `conditionalAccessPolicy.description` as "Not used" and nothing proves a value there survives an IntuneManagement round trip, so it lives in the deployment manifest and is enforced by rule C2 plus the E2 script against an operator deadline. Honest description: expiry *monitoring* with a shipped exit script, or a licensed access review with auto-remove — not an expiry the platform enforces.
 * **A11 — service-account fencing has two modes, one per tenant.** Shared (default) is the existing CA500/CA501 on the shared group and location. Per-System adds CA500/CA501 SYSTEMNAME templates, one instance pair per system on its own `SG-CA-SA-<SYSTEM>` group and `VCIO-NL-SA-<SYSTEM>` location. In Per-System the shared CA500 and CA501 are set to **disabled**, not report-only — report-only still evaluates and would impose the shared location on a per-system account. The mode is declared in the manifest and both the gate (B3a) and the drift validator (C6) read it.
@@ -42,14 +69,14 @@ Finding numbers below are the section IDs of the 2026.9.1 work order (revision 3
 * **C4** — a `[compliantDevice, mfa]` OR-grant over a population inside CA002's scope is flagged REDUNDANT.
 * **C5** — any device filter in a standard (non-`Transition/`) policy must equal `FILTER_COMPLIANT` exactly.
 * **C6** — fencing mode, drift validator. Shared: shared CA500 enabled, no per-system instances except the permitted DirSync one, whose members must not be in `SG-CA-ServiceAccounts`. Per-System: shared CA500 and CA501 disabled, every `SG-CA-SA-*` group with an enabled CA500 instance.
-* **Both validators now implement the same structural rule set**, plus required-identity presence per folder, the A10 transition pairing in both directions, the A9 instance-owns-its-exclusion-group rule, and MigrationTable completeness. **Neither gates on a policy count** — the tree count is printed for information only. A new CI workflow runs both against the repo on every change so they cannot disagree, and regenerates the tree to prove no JSON was hand-edited.
+* **Both validators now implement the same structural rule set**, plus required-identity presence per folder, the A10 transition pairing in both directions, the A9 instance-owns-its-exclusion-group rule, and MigrationTable completeness. **Neither gates on a policy count** — the tree count is printed for information only. A new CI workflow runs both against the repo on every change so they cannot disagree, and regenerates the tree to prove no JSON was hand-edited. Because the repo tree deliberately holds no template instances, CI also builds throwaway `CITEST` instances of CA801 and CA500 in a temp copy outside the repo, validates that copy, and then strips one instance's exclusion group to prove the A9 rule actually fires. Nothing reaches a tenant, and the rule is no longer only ever exercised by passing.
 
 ### Docs
 
 * **D1** — new "Switching from Security Defaults" section in the implementation guide (Phase B2), covering the two-gate procedure, what the tenant loses if the gap is left open (legacy-auth block, device-code block, MFA), CA007 staying report-only into Ring 2, and the leave-On-then-report-only-then-delete sequence for tenants with existing enforced policies.
 * **D2** — new runbook ring table. CA500 moves to Ring 1 with CA002; CA007 joins Ring 2; CA501 leaves the ring model for an owner and date in the worksheet; Ring 1 carries B3a; Rings 2 and 3 each add the GDAP partner sign-in test; Ring 4 adds the SPO/EXO checks. Plus: CA003 and CA004 are piloted rather than soaked, because report-only produces no data for user-action policies; and CA004 now gates WHfB and macOS PSSO registration, which a TAP satisfies.
 * **D3** — new [Docs/app-enforced-restrictions.md](Docs/app-enforced-restrictions.md): the SharePoint tenant setting and its site-level override, the per-OWA-mailbox-policy Exchange setting and the absence of any organization-level switch, idle session timeout as the third consumer, a nine-row test matrix, and the boundary stated plainly — EXO and SPO only, Teams files by way of SPO, nothing else honours it.
-* **D4** — new worksheet items: 6a (CA501 owner and deadline per account, or the recorded IP-fenced-without-allow-list decision), 6b (fencing mode), 14 (cross-tenant **inbound compliant-device trust** from the partner tenant, an organizational setting that is off by default), 15 (`SG-CA-Privileged` membership source), 16 (`SG-CA-Transition-Hybrid` membership and EXIT date). Item 13 gains a note on the OR-grant model for mobile. **Exclusion-group owners moved from item 14 to item 17** to make room; the runbook cross-reference moved with it.
+* **D4** — new worksheet items: 6a (CA501 owner and deadline per account, or the recorded IP-fenced-without-allow-list decision), 6b (fencing mode), 14a (cross-tenant **inbound compliant-device trust** from the partner tenant, an organizational setting that is off by default), 15 (`SG-CA-Privileged` membership source), 16 (`SG-CA-Transition-Hybrid` membership and EXIT date). Item 13 gains a note on the OR-grant model for mobile. **Existing item numbers are immutable from this release onward** — completed customer worksheets reference them, so a new parameter takes a sub-letter under the item it extends or appends past the highest existing number, and never displaces one. The worksheet says so at the top of the table.
 * **D5** — new [Docs/partner-access.md](Docs/partner-access.md).
 * **D6** — onboarding.md records that CA004 gates WHfB and macOS Platform SSO registration, and that a TAP satisfies it.
 * **D7** — README: version, policy index, the gate model, the transition edition, the new template shape and the `--instance` flow, and the fresh-deployment-only notice.
@@ -63,7 +90,7 @@ Finding numbers below are the section IDs of the 2026.9.1 work order (revision 3
 
 ### Contents
 
-28 core policies, 6 overlay, 4 transition variants, 6 templates — 44 in the tree, counted, and gated on by neither validator. 35 core groups plus one template-scope placeholder. 3 named locations plus one template-scope placeholder. Same uuid5 namespace as 2026.7.1, so every unchanged policy kept its ID.
+28 core policies, 6 overlay, 4 transition variants, 6 templates — 44 in the tree, counted, and gated on by neither validator. 23 built-in admin roles targeted by the 100s (down from 24). 35 core groups plus one template-scope placeholder. 3 named locations plus one template-scope placeholder. Same uuid5 namespace as 2026.7.1, so every unchanged policy kept its ID.
 
 ## 2026.7.1 — 2026-07-09 (initial release)
 
