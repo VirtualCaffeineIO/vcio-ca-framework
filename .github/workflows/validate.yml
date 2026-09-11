@@ -45,6 +45,61 @@ jobs:
         shell: pwsh
         run: ./Tools/Test-VcioCaBaseline.ps1 -Path .
 
+      # The repo tree deliberately contains no template instances, so the
+      # A9 instance rule and the SYSTEMNAME group/location wiring are never
+      # exercised by the steps above. This builds throwaway instances in a
+      # temp copy OUTSIDE the repo (so the porcelain check above cannot see
+      # them, and nothing can reach a tenant), validates the copy, and
+      # discards it.
+      - name: Instance fixture — instantiate templates and validate the result
+        shell: bash
+        run: |
+          set -euo pipefail
+          FIX="$(mktemp -d)"
+          git archive HEAD | tar -x -C "$FIX"
+
+          # Instances land in Templates/ so the validators' policy glob and
+          # their template-scope group/location loaders both see them.
+          python3 "$FIX/build/generate.py" --instance 801 CITEST --out Templates
+          python3 "$FIX/build/generate.py" --instance 500 CITEST --out Templates
+
+          for f in \
+            Templates/ConditionalAccess/CA801-VCIO-Ext-Tier0-CITEST.json \
+            Templates/ConditionalAccess/CA500-VCIO-ServiceAccounts-IPFence-CITEST.json \
+            Templates/Groups/SG-CA-Excl-CA801-CITEST.json \
+            Templates/Groups/SG-CA-Excl-CA500-CITEST.json \
+            Templates/Groups/SG-CA-SA-CITEST.json \
+            Templates/NamedLocations/VCIO-NL-SA-CITEST.json
+          do
+            test -f "$FIX/$f" || { echo "::error::instance fixture did not produce $f"; exit 1; }
+          done
+
+          echo "--- both validators against the instantiated copy ---"
+          ( cd "$FIX" && python3 build/validate.py )
+          ( cd "$FIX" && pwsh -File ./Tools/Test-VcioCaBaseline.ps1 -Path . )
+
+          # And prove the A9 rule actually fires: strip the 801 instance's own
+          # exclusion group and the validator must reject it. A rule that only
+          # ever passes is not a rule.
+          echo "--- negative: instance stripped of its exclusion group ---"
+          python3 -c '
+          import json, sys, os
+          root = sys.argv[1]
+          pol = os.path.join(root, "Templates/ConditionalAccess/CA801-VCIO-Ext-Tier0-CITEST.json")
+          grp = os.path.join(root, "Templates/Groups/SG-CA-Excl-CA801-CITEST.json")
+          d = json.load(open(pol)); gid = json.load(open(grp))["id"]
+          u = d["conditions"]["users"]
+          u["excludeGroups"] = [g for g in u["excludeGroups"] if g != gid]
+          json.dump(d, open(pol, "w"), indent=2)
+          ' "$FIX"
+          if ( cd "$FIX" && python3 build/validate.py ) ; then
+            echo "::error::A9 instance rule did NOT fire on an instance with no exclusion group."
+            exit 1
+          fi
+          echo "A9 fired as expected."
+
+          rm -rf "$FIX"
+
       # Informational. Neither validator gates on this number; F4 of the
       # 2026.9.1 work order expects 44 and the count is here to be read, not
       # to fail a build.
