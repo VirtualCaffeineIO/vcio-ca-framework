@@ -4,11 +4,13 @@ Nothing in this framework carries a functional default that could lock a tenant 
 
 ## Required parameters
 
+> **Item numbers are immutable from 2026.9.1 onward.** Completed customer worksheets reference them, so renumbering an existing item silently invalidates every copy already filled in and filed with an engagement record. A new parameter takes a sub-letter under the item it extends (`6a`, `14a`), or appends after the highest existing number — it never displaces one.
+
 | # | Parameter | Where it lands | Value (fill in) | Owner |
 |---|---|---|---|---|
 | 1 | Break-glass account UPNs (2, cloud-only, FIDO2) | `SG-CA-BreakGlass` members | | |
 | 2 | All-employees dynamic membership rule | `SG-CA-Users` | | |
-| 3 | Admin role list confirmation (default: 24 shipped roles) | 100s policies | | |
+| 3 | Admin role list confirmation (default: 23 shipped roles) | 100s policies | | |
 | 4 | Allowed countries | `VCIO-NL-AllowedCountries` | | |
 | 5 | Service account UPNs | `SG-CA-ServiceAccounts` members | | |
 | 6 | Service account egress IP ranges (per account/system) | `VCIO-NL-ServiceAccountIPs`, or `VCIO-NL-SA-<SYSTEM>` per instance | | |
@@ -21,10 +23,10 @@ Nothing in this framework carries a functional default that could lock a tenant 
 | 11 | Hybrid transition needed? (Y → deploy Transition variants + exit date) | 200s | | |
 | 12 | Cross-tenant access: trust home-tenant MFA for guests? | Entra cross-tenant settings (companion to CA400) | | |
 | 13 | Tier 1 app classification + posture (per sensitive app) | 800s templates | | |
-| 14 | **Cross-tenant inbound trust for compliant devices from the partner tenant** — an organizational setting, off by default | Entra cross-tenant access (companion to CA103 over GDAP) | | |
+| 14 | Exclusion-group owners (one named owner per SG-CA-Excl-*) | Governance | | |
+| 14a | **Cross-tenant inbound trust for compliant devices from the partner tenant** — an organizational setting, off by default | Entra cross-tenant access (companion to CA103 over GDAP) | | |
 | 15 | **`SG-CA-Privileged` membership source** — who reconciles it, how often, and at which step of the privilege-grant procedure a user is added | `SG-CA-Privileged`; `Tools/Compare-VcioPrivilegedScope.ps1` | | |
 | 16 | **`SG-CA-Transition-Hybrid` membership and EXIT date** | Group membership; manifest `transition.exitDate` | | |
-| 17 | Exclusion-group owners (one named owner per SG-CA-Excl-*) | Governance | | |
 
 ## Notes on specific parameters
 
@@ -36,7 +38,7 @@ Nothing in this framework carries a functional default that could lock a tenant 
 
 **13 — the OR-grant model for mobile.** CA202 (and the CA803 MAM-Mobile template) grant on `compliantDevice` **OR** `compliantApplication`, with no device filter. Read what that means before classifying an app: a compliant enrolled device passes on compliance; an unmanaged device passes on app protection; and an enrolled device that has *fallen out of compliance* is blocked, unless some other effective APP assignment happens to reach it — the shipped filters (`app.deviceManagementType -eq "Unmanaged"`) do not, though a customer-added assignment might. The previous model filtered managed devices out of the policy entirely, which meant a non-compliant enrolled phone was governed by nothing. If a customer wants the non-compliant enrolled device to keep working through MAM, that is an APP assignment they add deliberately and record here — not a side effect of a filter.
 
-**14 — partner device trust is not the same setting as partner MFA trust.** Item 12 is whether you trust the partner tenant's MFA claim; item 14 is whether you trust its device-compliance claim. Both are off by default and they are configured separately. CA103 requires a compliant device of everyone including service providers, and without item 14 the customer tenant has no compliance signal for a partner technician's device at all — no matter how well the partner manages it. See [partner-access.md](partner-access.md), including the fallbacks if the Ring 3 test says this cannot be satisfied over GDAP.
+**14a — partner device trust is not the same setting as partner MFA trust.** Item 12 is whether you trust the partner tenant's MFA claim; item 14a is whether you trust its device-compliance claim. Both are off by default and they are configured separately. CA103 requires a compliant device of everyone including service providers, and without item 14a the customer tenant has no compliance signal for a partner technician's device at all — no matter how well the partner manages it. See [partner-access.md](partner-access.md), including the fallbacks if the Ring 3 test says this cannot be satisfied over GDAP.
 
 **16 — the exit date is an operator deadline, not an enforced expiry.** It lives in the deployment manifest because the policy objects have nowhere to carry it: Graph documents `conditionalAccessPolicy.description` as "Not used" and nothing proves a value there survives an import/export round trip. What enforces it is the drift validator's C2 rule plus `Tools/Invoke-VcioTransitionExit.ps1` on a daily schedule — or, where Entra ID Governance is licensed, a recurring access review with auto-remove on the group. Emptying the group is the exit; the exit *order* is fixed and the script implements it.
 

@@ -61,7 +61,7 @@ The prereqs script runs **twice** — some checks only make sense before import,
 | CA100 Privileged-PhishingResistantMFA | Phishing-resistant strength, all apps, **no app exclusions** |
 | CA101 Privileged-CompliantDevice | Compliant device for admin roles, any platform |
 | CA102 Privileged-SessionHygiene | 8h sign-in frequency + no persistent browser |
-| *(all three)* | Target the 24 built-in roles **and `SG-CA-Privileged`** — custom roles, AU-scoped grants and Azure RBAC control-plane holders that role targeting cannot see. Reconciled monthly by `Tools/Compare-VcioPrivilegedScope.ps1` |
+| *(all three)* | Target the 23 built-in roles **and `SG-CA-Privileged`** — custom roles, AU-scoped grants and Azure RBAC control-plane holders that role targeting cannot see. Reconciled monthly by `Tools/Compare-VcioPrivilegedScope.ps1` |
 | CA103 Tier0-ControlPlane-AllUsers | Azure management + admin portals: phishing-resistant MFA **and** compliant device, for everyone |
 
 ### Core — Managed users (200s), BYOD (300s)
@@ -130,6 +130,15 @@ Most classic import failures are prevented by the prereqs script — run it with
 | Guests report double MFA prompts | Cross-tenant access settings don't trust home-tenant MFA | Parameters worksheet #12 — decide and configure the cross-tenant trust before enabling CA400 |
 
 ## Rebuilding from source
+
+### Tooling requirements
+
+| Tool | Needs |
+|---|---|
+| `build/generate.py`, `build/validate.py` | Python 3.8+ |
+| `Tools/Test-VcioCaBaseline.ps1` | **PowerShell 7.x** (`pwsh`) — cross-platform, so it runs on Linux and macOS as well as Windows. It is not supported on Windows PowerShell 5.1 |
+| `Prereqs/Invoke-VcioCaPrereqs.ps1`, `Tools/Compare-VcioPrivilegedScope.ps1`, `Tools/Invoke-VcioTransitionExit.ps1` | PowerShell 7.x recommended (5.1 tolerated), plus the Microsoft Graph SDK modules each script lists. Ring 4 additionally needs `Microsoft.Online.SharePoint.PowerShell` and `ExchangeOnlineManagement`; `Compare-VcioPrivilegedScope.ps1` needs `Az.Accounts` and `Az.ResourceGraph` |
+| IntuneManagement (import) | **Windows PowerShell 5.1** — it is a WPF app. This is the one place 5.1 is required, and it is why the workstation setup has two shells |
 
 `build/generate.py` produces every policy, group, and named location deterministically (same input → same GUIDs, unchanged across releases). **Every policy change goes through it and the tree is regenerated; the JSON is never hand-edited** — CI regenerates and fails on any diff, so a hand-edit does not survive a build.
 

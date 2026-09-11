@@ -28,7 +28,11 @@ AUTHSTR_MFA = ("00000000-0000-0000-0000-000000000002", "Multifactor authenticati
 AUTHSTR_PR = ("00000000-0000-0000-0000-000000000004", "Phishing-resistant MFA")
 
 # Admin roles (built-in role template IDs — identical in every tenant).
-# Sourced from the 2026.6 community list; review item for Aaron.
+# Every ID and name below re-verified 2026-09-11 against Microsoft Learn:
+# https://learn.microsoft.com/entra/identity/role-based-access-control/permissions-reference#all-roles
+# Three labels were wrong in the 2026.6 community list this was seeded from —
+# two were shifted onto the wrong ID, and one named a role that does not exist
+# under that name. Names below are the page's, not the list's.
 ADMIN_ROLES = [
     "62e90394-69f5-4237-9190-012177145e10",  # Global Administrator
     "194ae4cb-b126-40b2-bd5b-6091b380977d",  # Security Administrator
@@ -49,12 +53,18 @@ ADMIN_ROLES = [
     "d2562ede-74db-457e-a7b6-544e236ebb61",  # AI Administrator
     "db506228-d27e-4b7d-95e5-295956d6615f",  # Agent ID Administrator
     "6b942400-691f-4bf0-9d12-d8a254a2baf5",  # Agent Registry Administrator
-    "e93e3737-fa85-474a-aee4-7d3fb86510f3",  # Entra ID Backup Administrator
-    "b6a27b2b-f905-4b2e-81b5-0d90e0ef1fdb",  # Windows 365 Administrator
+    "b6a27b2b-f905-4b2e-81b5-0d90e0ef1fdb",  # Entra Backup Administrator
     "1707125e-0aa2-4d4d-8655-a7c786c76a25",  # Microsoft 365 Backup Administrator
     "69091246-20e8-4a56-aa4d-066075b2a7a8",  # Teams Administrator
-    "11451d60-acb2-45eb-a7d6-43d0f0125c13",  # Windows Update Deployment Administrator
+    "11451d60-acb2-45eb-a7d6-43d0f0125c13",  # Windows 365 Administrator
 ]
+# REMOVED 2026-09-11: e93e3737-fa85-474a-aee4-7d3fb86510f3. The community list
+# called it "Entra ID Backup Administrator"; Learn lists it as Dragon
+# Administrator, a product admin role with no privileged label. It is not
+# Tier 0 and does not belong in a phishing-resistant-MFA + compliant-device
+# scope. No replacement added — the two roles whose labels it displaced
+# (Entra Backup Administrator, Windows 365 Administrator) were already in the
+# list under the wrong names and are now correctly labelled above.
 
 # Directory Synchronization Accounts — the Entra Connect sync account's role.
 # Template ID verified 2026-09-11 against

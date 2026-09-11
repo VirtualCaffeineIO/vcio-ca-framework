@@ -553,9 +553,9 @@ if ($Gate -in @('Ring2','Ring3')) {
 if ($Gate -eq 'Ring3') {
     $privGroup = Get-VcioGroup 'SG-CA-Privileged'
     $principals = @{}
-    # The same 24 built-in roles the 100s policies target (generate.py
+    # The same 23 built-in roles the 100s policies target (generate.py
     # ADMIN_ROLES), plus SG-CA-Privileged for everything role targeting
-    # cannot see.
+    # cannot see. Keep in step with generate.py: this is a hardcoded copy.
     $adminRoleIds = @(
         '62e90394-69f5-4237-9190-012177145e10','194ae4cb-b126-40b2-bd5b-6091b380977d',
         'f28a1f50-f6e7-4571-818b-6a12f2af6b6c','29232cdf-9323-42fd-ade2-1d097af3e4de',
@@ -566,8 +566,8 @@ if ($Gate -eq 'Ring3') {
         '7be44c8a-adaf-4e2a-84d6-ab2649e08a13','e8611ab8-c189-46e8-94e1-60213ab1f814',
         'f2ef992c-3afb-46b9-b7cf-a126ee74c451','3a2c62db-5318-420d-8d74-23affee5d9d5',
         'd2562ede-74db-457e-a7b6-544e236ebb61','db506228-d27e-4b7d-95e5-295956d6615f',
-        '6b942400-691f-4bf0-9d12-d8a254a2baf5','e93e3737-fa85-474a-aee4-7d3fb86510f3',
-        'b6a27b2b-f905-4b2e-81b5-0d90e0ef1fdb','1707125e-0aa2-4d4d-8655-a7c786c76a25',
+        '6b942400-691f-4bf0-9d12-d8a254a2baf5','b6a27b2b-f905-4b2e-81b5-0d90e0ef1fdb',
+        '1707125e-0aa2-4d4d-8655-a7c786c76a25',
         '69091246-20e8-4a56-aa4d-066075b2a7a8','11451d60-acb2-45eb-a7d6-43d0f0125c13'
     )
     foreach ($rid in $adminRoleIds) {
