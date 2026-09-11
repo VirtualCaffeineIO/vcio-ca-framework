@@ -1,0 +1,53 @@
+name: validate
+
+# Section C: both validators run against the repo tree on every change, so the
+# release validator and the operator's drift validator cannot disagree about a
+# structural rule. The drift validator runs WITHOUT -Manifest here — C2 and C6
+# need tenant facts the repo does not carry, and they report as SKIP.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # "Every policy change is made in build/generate.py and regenerated;
+      # never hand-edit the JSON." This step is what makes that a rule rather
+      # than a request: a hand-edited file does not survive a regeneration.
+      - name: Tree is exactly what generate.py produces
+        run: |
+          python3 build/generate.py
+          if ! git diff --quiet; then
+            echo "::error::The committed tree does not match build/generate.py output."
+            echo "Someone hand-edited JSON, or generate.py was changed without regenerating."
+            git --no-pager diff --stat
+            exit 1
+          fi
+
+      - name: Release validator (Python)
+        run: python3 build/validate.py
+
+      - name: Drift validator (PowerShell)
+        shell: pwsh
+        run: ./Tools/Test-VcioCaBaseline.ps1 -Path .
+
+      # Informational. Neither validator gates on this number; F4 of the
+      # 2026.9.1 work order expects 44 and the count is here to be read, not
+      # to fail a build.
+      - name: Policy tree count
+        run: |
+          count=$(find Config/ConditionalAccess Config-Overlay-P2/ConditionalAccess \
+                       Templates/ConditionalAccess Transition/ConditionalAccess \
+                       -name 'CA*.json' | wc -l)
+          echo "Policy tree: $count files"
+          echo "### Policy tree: $count files" >> "$GITHUB_STEP_SUMMARY"
