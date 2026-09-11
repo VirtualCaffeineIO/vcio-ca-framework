@@ -27,9 +27,13 @@ jobs:
       - name: Tree is exactly what generate.py produces
         run: |
           python3 build/generate.py
-          if ! git diff --quiet; then
+          # --porcelain, not `git diff`: a policy added to generate.py but
+          # never committed lands here as an UNTRACKED file, which `git diff`
+          # does not see at all. That is the likeliest version of this mistake.
+          if [ -n "$(git status --porcelain)" ]; then
             echo "::error::The committed tree does not match build/generate.py output."
             echo "Someone hand-edited JSON, or generate.py was changed without regenerating."
+            git status --porcelain
             git --no-pager diff --stat
             exit 1
           fi
