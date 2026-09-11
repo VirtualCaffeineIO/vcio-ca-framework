@@ -54,7 +54,6 @@
       "includeGroups": [],
       "excludeGroups@odata.type": "#Collection(String)",
       "excludeGroups": [
-        "c1ffc28f-736e-5ce3-821d-9d14f3d8be79",
         "07c1a51c-0c49-5590-af9c-8936fab2176b",
         "2ab7191e-9808-590a-8cad-af37a2fbee8c"
       ],

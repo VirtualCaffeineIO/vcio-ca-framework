@@ -1,8 +1,8 @@
 {
   "@odata.type": "#microsoft.graph.conditionalAccessPolicy",
-  "id": "ae59583d-d972-5437-bc82-3bdbf1ec7b8e",
+  "id": "7ee6ba80-adb5-5dc8-b92b-9d6410863cec",
   "templateId": null,
-  "displayName": "CA301-VCIO-BYOD-Windows-RequireAppProtection",
+  "displayName": "CA007-VCIO-Global-BlockAuthTransfer",
   "createdDateTime": "2026-07-09T00:00:00.0000000Z",
   "modifiedDateTime": "2026-07-09T00:00:00.0000000Z",
   "state@odata.type": "#microsoft.graph.conditionalAccessPolicyState",
@@ -17,44 +17,20 @@
     "signInRiskLevels": [],
     "clientAppTypes@odata.type": "#Collection(microsoft.graph.conditionalAccessClientApp)",
     "clientAppTypes": [
-      "browser"
+      "all"
     ],
-    "platforms": {
-      "@odata.type": "#microsoft.graph.conditionalAccessPlatforms",
-      "includePlatforms@odata.type": "#Collection(microsoft.graph.conditionalAccessDevicePlatform)",
-      "includePlatforms": [
-        "windows"
-      ],
-      "excludePlatforms@odata.type": "#Collection(microsoft.graph.conditionalAccessDevicePlatform)",
-      "excludePlatforms": []
-    },
+    "platforms": null,
     "locations": null,
     "times": null,
     "deviceStates": null,
-    "devices": {
-      "@odata.type": "#microsoft.graph.conditionalAccessDevices",
-      "includeDeviceStates@odata.type": "#Collection(String)",
-      "includeDeviceStates": [],
-      "excludeDeviceStates@odata.type": "#Collection(String)",
-      "excludeDeviceStates": [],
-      "includeDevices@odata.type": "#Collection(String)",
-      "includeDevices": [],
-      "excludeDevices@odata.type": "#Collection(String)",
-      "excludeDevices": [],
-      "deviceFilter": {
-        "@odata.type": "#microsoft.graph.conditionalAccessFilter",
-        "mode@odata.type": "#microsoft.graph.filterMode",
-        "mode": "exclude",
-        "rule": "device.isCompliant -eq True"
-      }
-    },
+    "devices": null,
     "clientApplications": null,
     "agents": null,
     "applications": {
       "@odata.type": "#microsoft.graph.conditionalAccessApplications",
       "includeApplications@odata.type": "#Collection(String)",
       "includeApplications": [
-        "Office365"
+        "All"
       ],
       "excludeApplications@odata.type": "#Collection(String)",
       "excludeApplications": [],
@@ -67,18 +43,17 @@
     "users": {
       "@odata.type": "#microsoft.graph.conditionalAccessUsers",
       "includeUsers@odata.type": "#Collection(String)",
-      "includeUsers": [],
+      "includeUsers": [
+        "All"
+      ],
       "excludeUsers@odata.type": "#Collection(String)",
       "excludeUsers": [],
       "includeGroups@odata.type": "#Collection(String)",
-      "includeGroups": [
-        "6c6a7c97-190e-57ee-8b2b-77f9542c5f47"
-      ],
+      "includeGroups": [],
       "excludeGroups@odata.type": "#Collection(String)",
       "excludeGroups": [
-        "ff8918b6-dc11-5593-b6a6-556057f53b6f",
         "07c1a51c-0c49-5590-af9c-8936fab2176b",
-        "95b712db-8bd5-57a6-bccb-b916b308129f"
+        "45b7cd01-a658-5d42-82d3-52129df83763"
       ],
       "includeRoles@odata.type": "#Collection(String)",
       "includeRoles": [],
@@ -86,6 +61,10 @@
       "excludeRoles": [],
       "includeGuestsOrExternalUsers": null,
       "excludeGuestsOrExternalUsers": null
+    },
+    "authenticationFlows": {
+      "@odata.type": "#microsoft.graph.conditionalAccessAuthenticationFlows",
+      "transferMethods": "authenticationTransfer"
     }
   },
   "grantControls": {
@@ -93,7 +72,7 @@
     "operator": "OR",
     "builtInControls@odata.type": "#Collection(microsoft.graph.conditionalAccessGrantControl)",
     "builtInControls": [
-      "compliantApplication"
+      "block"
     ],
     "customAuthenticationFactors@odata.type": "#Collection(String)",
     "customAuthenticationFactors": [],

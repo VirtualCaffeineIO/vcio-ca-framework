@@ -1,8 +1,8 @@
 {
   "@odata.type": "#microsoft.graph.conditionalAccessPolicy",
-  "id": "ae59583d-d972-5437-bc82-3bdbf1ec7b8e",
+  "id": "ff4237e5-ae29-53e3-a36b-704caa680724",
   "templateId": null,
-  "displayName": "CA301-VCIO-BYOD-Windows-RequireAppProtection",
+  "displayName": "CA300-VCIO-BYOD-BrowserSessionControls-TRANSITION",
   "createdDateTime": "2026-07-09T00:00:00.0000000Z",
   "modifiedDateTime": "2026-07-09T00:00:00.0000000Z",
   "state@odata.type": "#microsoft.graph.conditionalAccessPolicyState",
@@ -19,15 +19,7 @@
     "clientAppTypes": [
       "browser"
     ],
-    "platforms": {
-      "@odata.type": "#microsoft.graph.conditionalAccessPlatforms",
-      "includePlatforms@odata.type": "#Collection(microsoft.graph.conditionalAccessDevicePlatform)",
-      "includePlatforms": [
-        "windows"
-      ],
-      "excludePlatforms@odata.type": "#Collection(microsoft.graph.conditionalAccessDevicePlatform)",
-      "excludePlatforms": []
-    },
+    "platforms": null,
     "locations": null,
     "times": null,
     "deviceStates": null,
@@ -45,7 +37,7 @@
         "@odata.type": "#microsoft.graph.conditionalAccessFilter",
         "mode@odata.type": "#microsoft.graph.filterMode",
         "mode": "exclude",
-        "rule": "device.isCompliant -eq True"
+        "rule": "device.isCompliant -eq True -or device.trustType -eq \"ServerAd\""
       }
     },
     "clientApplications": null,
@@ -72,13 +64,12 @@
       "excludeUsers": [],
       "includeGroups@odata.type": "#Collection(String)",
       "includeGroups": [
-        "6c6a7c97-190e-57ee-8b2b-77f9542c5f47"
+        "ff8918b6-dc11-5593-b6a6-556057f53b6f"
       ],
       "excludeGroups@odata.type": "#Collection(String)",
       "excludeGroups": [
-        "ff8918b6-dc11-5593-b6a6-556057f53b6f",
-        "07c1a51c-0c49-5590-af9c-8936fab2176b",
-        "95b712db-8bd5-57a6-bccb-b916b308129f"
+        "acce4cf7-5a99-5443-be06-e7cab20b999a",
+        "07c1a51c-0c49-5590-af9c-8936fab2176b"
       ],
       "includeRoles@odata.type": "#Collection(String)",
       "includeRoles": [],
@@ -88,18 +79,18 @@
       "excludeGuestsOrExternalUsers": null
     }
   },
-  "grantControls": {
-    "@odata.type": "#microsoft.graph.conditionalAccessGrantControls",
-    "operator": "OR",
-    "builtInControls@odata.type": "#Collection(microsoft.graph.conditionalAccessGrantControl)",
-    "builtInControls": [
-      "compliantApplication"
-    ],
-    "customAuthenticationFactors@odata.type": "#Collection(String)",
-    "customAuthenticationFactors": [],
-    "termsOfUse@odata.type": "#Collection(String)",
-    "termsOfUse": [],
-    "authenticationStrength": null
-  },
-  "sessionControls": null
+  "grantControls": null,
+  "sessionControls": {
+    "@odata.type": "#microsoft.graph.conditionalAccessSessionControls",
+    "disableResilienceDefaults": null,
+    "cloudAppSecurity": null,
+    "signInFrequency": null,
+    "persistentBrowser": null,
+    "continuousAccessEvaluation": null,
+    "secureSignInSession": null,
+    "applicationEnforcedRestrictions": {
+      "@odata.type": "#microsoft.graph.applicationEnforcedRestrictionsSessionControl",
+      "isEnabled": true
+    }
+  }
 }

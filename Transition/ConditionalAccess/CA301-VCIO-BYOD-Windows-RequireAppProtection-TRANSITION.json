@@ -1,8 +1,8 @@
 {
   "@odata.type": "#microsoft.graph.conditionalAccessPolicy",
-  "id": "ae59583d-d972-5437-bc82-3bdbf1ec7b8e",
+  "id": "8b178991-53ba-5b29-ad77-22587b5e147a",
   "templateId": null,
-  "displayName": "CA301-VCIO-BYOD-Windows-RequireAppProtection",
+  "displayName": "CA301-VCIO-BYOD-Windows-RequireAppProtection-TRANSITION",
   "createdDateTime": "2026-07-09T00:00:00.0000000Z",
   "modifiedDateTime": "2026-07-09T00:00:00.0000000Z",
   "state@odata.type": "#microsoft.graph.conditionalAccessPolicyState",
@@ -45,7 +45,7 @@
         "@odata.type": "#microsoft.graph.conditionalAccessFilter",
         "mode@odata.type": "#microsoft.graph.filterMode",
         "mode": "exclude",
-        "rule": "device.isCompliant -eq True"
+        "rule": "device.isCompliant -eq True -or device.trustType -eq \"ServerAd\""
       }
     },
     "clientApplications": null,
@@ -72,13 +72,12 @@
       "excludeUsers": [],
       "includeGroups@odata.type": "#Collection(String)",
       "includeGroups": [
-        "6c6a7c97-190e-57ee-8b2b-77f9542c5f47"
+        "ff8918b6-dc11-5593-b6a6-556057f53b6f"
       ],
       "excludeGroups@odata.type": "#Collection(String)",
       "excludeGroups": [
-        "ff8918b6-dc11-5593-b6a6-556057f53b6f",
-        "07c1a51c-0c49-5590-af9c-8936fab2176b",
-        "95b712db-8bd5-57a6-bccb-b916b308129f"
+        "95b712db-8bd5-57a6-bccb-b916b308129f",
+        "07c1a51c-0c49-5590-af9c-8936fab2176b"
       ],
       "includeRoles@odata.type": "#Collection(String)",
       "includeRoles": [],

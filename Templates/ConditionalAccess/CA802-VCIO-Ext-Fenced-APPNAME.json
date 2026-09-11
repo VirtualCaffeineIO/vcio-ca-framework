@@ -47,7 +47,7 @@
         "@odata.type": "#microsoft.graph.conditionalAccessFilter",
         "mode@odata.type": "#microsoft.graph.filterMode",
         "mode": "exclude",
-        "rule": "device.deviceOwnership -eq \"Company\" -or device.isCompliant -eq True"
+        "rule": "device.isCompliant -eq True"
       }
     },
     "clientApplications": null,

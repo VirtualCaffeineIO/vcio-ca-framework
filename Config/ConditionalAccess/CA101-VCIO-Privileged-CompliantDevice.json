@@ -50,7 +50,9 @@
       "excludeUsers@odata.type": "#Collection(String)",
       "excludeUsers": [],
       "includeGroups@odata.type": "#Collection(String)",
-      "includeGroups": [],
+      "includeGroups": [
+        "af830bf9-1268-5da7-89ba-c2b9221e8bfd"
+      ],
       "excludeGroups@odata.type": "#Collection(String)",
       "excludeGroups": [
         "07c1a51c-0c49-5590-af9c-8936fab2176b",
