@@ -139,6 +139,7 @@ Most classic import failures are prevented by the prereqs script — run it with
 | `Tools/Test-VcioCaBaseline.ps1` | **PowerShell 7.x** (`pwsh`) — cross-platform, so it runs on Linux and macOS as well as Windows. It is not supported on Windows PowerShell 5.1 |
 | `Prereqs/Invoke-VcioCaPrereqs.ps1`, `Tools/Compare-VcioPrivilegedScope.ps1`, `Tools/Invoke-VcioTransitionExit.ps1` | PowerShell 7.x recommended (5.1 tolerated), plus the Microsoft Graph SDK modules each script lists. Ring 4 additionally needs `Microsoft.Online.SharePoint.PowerShell` and `ExchangeOnlineManagement`; `Compare-VcioPrivilegedScope.ps1` needs `Az.Accounts` and `Az.ResourceGraph` |
 | IntuneManagement (import) | **Windows PowerShell 5.1** — it is a WPF app. This is the one place 5.1 is required, and it is why the workstation setup has two shells |
+| `Tests/` (regression suite) | **Pester 6.2.0** (`Install-Module Pester -RequiredVersion 6.2.0`). Graph and Az are stubbed, so the tests need no tenant and no SDK: `Invoke-Pester -Path Tests`. CI pins the version |
 
 `build/generate.py` produces every policy, group, and named location deterministically (same input → same GUIDs, unchanged across releases). **Every policy change goes through it and the tree is regenerated; the JSON is never hand-edited** — CI regenerates and fails on any diff, so a hand-edit does not survive a build.
 

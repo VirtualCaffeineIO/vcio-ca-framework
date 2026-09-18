@@ -75,27 +75,60 @@ $TRANSITION_POLICIES = @(
 if (-not $LogPath) {
     $LogPath = Join-Path (Split-Path $Manifest -Parent) 'transition-exit.log'
 }
+Import-Module (Join-Path $PSScriptRoot 'VcioCaCommon.psm1') -Force
+
 function Write-Log([string]$Message) {
-    $line = "{0}  {1}" -f (Get-Date).ToString('yyyy-MM-ddTHH:mm:ssK'), $Message
+    $line = "{0}  {1}" -f [datetime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ'), $Message
     Write-Host $line
     if ($PSCmdlet.ShouldProcess($LogPath, 'append to run log')) {
         Add-Content -Path $LogPath -Value $line -Encoding utf8
     }
 }
 
+# Finding 7 — connect to the tenant the MANIFEST names, and prove it before
+# anything is written. This script removes group members and disables
+# policies; the first write is actually Write-Log's Add-Content, so the
+# assertion goes above it, not merely above the Graph writes.
 Write-Host 'Connecting to Microsoft Graph...' -ForegroundColor Cyan
-Connect-MgGraph -Scopes @(
+Connect-MgGraph -TenantId $mf.tenantId -Scopes @(
     'Group.ReadWrite.All','User.Read.All','Policy.ReadWrite.ConditionalAccess',
     'Policy.Read.All','AuditLog.Read.All'
 ) -NoWelcome
+$connectedTenant = Assert-VcioTenantContext -ExpectedTenantId $mf.tenantId
+Write-Host "Tenant verified: $connectedTenant" -ForegroundColor Cyan
 
 $policies = @(Get-MgIdentityConditionalAccessPolicy -All)
-function Get-Policy([string]$Name) { $policies | Where-Object { $_.DisplayName -eq $Name } | Select-Object -First 1 }
 
-$group = Get-MgGroup -Filter "displayName eq '$TRANSITION_GROUP'" -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $group) { throw "$TRANSITION_GROUP not found in the tenant." }
-$usersGroup = Get-MgGroup -Filter "displayName eq '$USERS_GROUP'" -ErrorAction SilentlyContinue | Select-Object -First 1
-if (-not $usersGroup) { throw "$USERS_GROUP not found in the tenant." }
+# Finding 7 — resolve by the object ids the manifest recorded at import.
+# displayName is a fallback only, and is logged as one: the shipped GUIDs are
+# uuid5 build ids that IntuneManagement remaps, and a displayName lookup will
+# cheerfully match a policy someone renamed or duplicated.
+function Resolve-Policy([string]$Name) {
+    $ref = Resolve-VcioObjectId -Manifest $mf -Kind 'policies' -Name $Name -Fallback {
+        param($n) ($policies | Where-Object { $_.DisplayName -eq $n } | Select-Object -First 1).Id
+    }
+    if ($ref.Source -eq 'displayName-fallback') {
+        Write-Log "  NOTE: '$Name' resolved by displayName FALLBACK — no object id in the manifest. Record it."
+    }
+    if (-not $ref.Id) { return $null }
+    $policies | Where-Object { $_.Id -eq $ref.Id } | Select-Object -First 1
+}
+function Resolve-Group([string]$Name) {
+    $ref = Resolve-VcioObjectId -Manifest $mf -Kind 'groups' -Name $Name -Fallback {
+        param($n) (Get-MgGroup -Filter "displayName eq '$n'" -ErrorAction SilentlyContinue | Select-Object -First 1).Id
+    }
+    if ($ref.Source -eq 'displayName-fallback') {
+        Write-Log "  NOTE: '$Name' resolved by displayName FALLBACK — no object id in the manifest. Record it."
+    }
+    $ref
+}
+
+$groupRef = Resolve-Group $TRANSITION_GROUP
+if (-not $groupRef.Id) { throw "$TRANSITION_GROUP could not be resolved from the manifest or by displayName." }
+$group = [pscustomobject]@{ Id = $groupRef.Id }
+$usersRef = Resolve-Group $USERS_GROUP
+if (-not $usersRef.Id) { throw "$USERS_GROUP could not be resolved from the manifest or by displayName." }
+$usersGroup = [pscustomobject]@{ Id = $usersRef.Id }
 
 $members = @(Get-MgGroupMember -GroupId $group.Id -All)
 $exitDate = if ($mf.transition.exitDate) { [datetime]::Parse($mf.transition.exitDate) } else { $null }
@@ -118,7 +151,7 @@ if ($members.Count -gt 0) {
     $blocking = New-Object System.Collections.Generic.List[string]
 
     foreach ($n in $STANDARD_POLICIES) {
-        $p = Get-Policy $n
+        $p = Resolve-Policy $n
         if (-not $p) { $blocking.Add("$n is absent from the tenant") }
         elseif ($p.State -ne 'enabled') { $blocking.Add("$n is '$($p.State)', not 'enabled'") }
     }
@@ -143,21 +176,30 @@ if ($members.Count -gt 0) {
     Write-Log "Fallback verified for all $($members.Count) member(s). Exporting roster, then removing."
     foreach ($r in $roster) { Write-Log "  REMOVING $($r.Upn) ($($r.Id))" }
 
+    # Finding 6 — removedAt is a precise UTC instant per user, and it is
+    # persisted BEFORE the removal it describes. A date-only, local-time stamp
+    # written once after the loop had two failure modes: a run that died
+    # halfway left members removed with nothing recording it, so the next run
+    # could not know whom to verify; and a same-day sign-in from BEFORE the
+    # removal satisfied "createdDateTime ge <date>" and counted as evidence of
+    # post-removal coverage.
+    $existing = @($mf.transition.verifiedRemovals)
+    $known = @($existing | ForEach-Object { $_.id })
     foreach ($r in $roster) {
+        if ($r.Id -in $known) { continue }
+        $removedAt = [datetime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+        $existing += [pscustomobject]@{ upn = $r.Upn; id = $r.Id; removedAt = $removedAt; verified = $false }
+        $mf.transition.verifiedRemovals = @($existing)
+        if ($PSCmdlet.ShouldProcess($Manifest, "record removal of $($r.Upn) at $removedAt")) {
+            # Durable before the next removal, so a partial run resumes.
+            $mf | ConvertTo-Json -Depth 12 | Set-Content -Path $Manifest -Encoding utf8
+        }
         if ($PSCmdlet.ShouldProcess($r.Upn, "remove from $TRANSITION_GROUP")) {
             Remove-MgGroupMemberByRef -GroupId $group.Id -DirectoryObjectId $r.Id
         }
     }
-
-    # Record who was removed and when, so later runs know whom to verify.
-    $pending = @($roster | ForEach-Object {
-        [pscustomobject]@{ upn = $_.Upn; id = $_.Id; removedDate = (Get-Date).ToString('yyyy-MM-dd'); verified = $false }
-    })
-    $existing = @($mf.transition.verifiedRemovals)
-    $known = @($existing | ForEach-Object { $_.id })
-    $mf.transition.verifiedRemovals = @($existing) + @($pending | Where-Object { $_.id -notin $known })
-    $mf.transition.groupEmptiedDate = (Get-Date).ToString('yyyy-MM-dd')
-    if ($PSCmdlet.ShouldProcess($Manifest, 'record removals')) {
+    $mf.transition.groupEmptiedDate = [datetime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+    if ($PSCmdlet.ShouldProcess($Manifest, 'record group-emptied timestamp')) {
         $mf | ConvertTo-Json -Depth 12 | Set-Content -Path $Manifest -Encoding utf8
     }
     Write-Log 'Members removed. Transition policies stay ENABLED until every removed user is verified on the standard path.'
@@ -174,14 +216,28 @@ if (-not $removals.Count) {
 
 $standardIds = @{}
 foreach ($n in $STANDARD_POLICIES) {
-    $p = Get-Policy $n
+    $p = Resolve-Policy $n
     if ($p) { $standardIds[$p.Id] = $n }
+}
+if ($standardIds.Count -ne $STANDARD_POLICIES.Count) {
+    Write-Log "STOPPED. Only $($standardIds.Count) of $($STANDARD_POLICIES.Count) standard policies resolved; cannot verify coverage against policies that are not there."
+    exit 1
 }
 
 $unverified = New-Object System.Collections.Generic.List[string]
 foreach ($r in $removals) {
     if ($r.verified) { continue }
-    $since = ([datetime]::Parse($r.removedDate)).ToString('yyyy-MM-ddTHH:mm:ssZ')
+    # Tolerate a manifest written by an older version (removedDate, date-only).
+    $stampText = if ($r.PSObject.Properties.Name -contains 'removedAt' -and $r.removedAt) { $r.removedAt }
+                 elseif ($r.PSObject.Properties.Name -contains 'removedDate' -and $r.removedDate) { $r.removedDate }
+                 else { $null }
+    if (-not $stampText) {
+        $unverified.Add("$($r.upn) — no removal timestamp recorded; cannot establish what counts as post-removal.")
+        continue
+    }
+    $removedAt = [datetime]::Parse($stampText, $null,
+        [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal)
+    $since = $removedAt.ToString('yyyy-MM-ddTHH:mm:ssZ')
     $signIns = @()
     try {
         $signIns = @(Get-MgAuditLogSignIn -Filter "userId eq '$($r.id)' and createdDateTime ge $since" -All -ErrorAction Stop)
@@ -189,17 +245,25 @@ foreach ($r in $removals) {
         $unverified.Add("$($r.upn) — could not read sign-in logs: $($_.Exception.Message)")
         continue
     }
-    $applied = @($signIns | Where-Object {
-        @($_.AppliedConditionalAccessPolicies | Where-Object { $standardIds.ContainsKey($_.Id) -and $_.Result -ne 'notApplied' }).Count -gt 0
-    })
-    if ($applied.Count) {
+
+    # Finding 6 — evidence is an ENFORCED result. 'notApplied' proves nothing,
+    # and a reportOnly* result proves the policy evaluated but NOT that it was
+    # enforcing, which is exactly the state this exit is supposed to leave
+    # behind. The server-side filter is coarse (whole seconds), so
+    # Test-VcioStandardCoverage re-filters strictly after the precise instant.
+    #
+    # Per policy, not per sign-in: the four cannot co-occur on one sign-in —
+    # CA200 is mobileAppsAndDesktopClients while CA300/CA301 are browser, so
+    # they are mutually exclusive on clientAppTypes. Requiring all four on a
+    # single sign-in would never be satisfiable and the exit would never
+    # complete. Each of the four must show an enforced result on SOME
+    # post-removal sign-in.
+    $cov = Test-VcioStandardCoverage -SignIns $signIns -PolicyIdToName $standardIds -RemovedAt $removedAt
+    if ($cov.Verified) {
         $r.verified = $true
-        Write-Log "  VERIFIED $($r.upn) — standard policies applied on a post-removal sign-in."
+        Write-Log "  VERIFIED $($r.upn) — all four standard policies show an enforced result across $($cov.SignInsConsidered) post-removal sign-in(s)."
     } else {
-        # Time passing is not evidence. Until this user actually signs in and
-        # the log shows a standard policy applied, nothing proves the fallback
-        # took effect for them.
-        $unverified.Add("$($r.upn) — no post-removal sign-in shows a standard policy applied (removed $($r.removedDate))")
+        $unverified.Add("$($r.upn) — removed $stampText; $($cov.SignInsConsidered) post-removal sign-in(s), but no enforced result yet for: $($cov.Missing -join ', ')")
     }
 }
 
@@ -216,7 +280,7 @@ if ($unverified.Count) {
 
 Write-Log 'Every removed user verified on the standard path. Disabling the transition policies.'
 foreach ($n in $TRANSITION_POLICIES) {
-    $p = Get-Policy $n
+    $p = Resolve-Policy $n
     if (-not $p) { Write-Log "  $n absent — nothing to disable."; continue }
     if ($p.State -eq 'disabled') { Write-Log "  $n already disabled."; continue }
     if ($PSCmdlet.ShouldProcess($n, "set state to 'disabled'")) {

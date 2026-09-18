@@ -45,6 +45,27 @@ jobs:
         shell: pwsh
         run: ./Tools/Test-VcioCaBaseline.ps1 -Path .
 
+      # Regression tests for the second external source review, one Describe
+      # per finding. Graph and Az are stubbed, so this needs no tenant and no
+      # SDK. The Pester version is PINNED: these were written against 6.2.0,
+      # and a runner resolving a different major hands you failures that are
+      # not about the code under test.
+      - name: Pester regression tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Module -ListAvailable Pester | Where-Object Version -eq '6.2.0')) {
+            Install-Module Pester -RequiredVersion 6.2.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          }
+          Import-Module Pester -RequiredVersion 6.2.0
+          $c = New-PesterConfiguration
+          $c.Run.Path = 'Tests'
+          $c.Run.PassThru = $true
+          $c.Output.Verbosity = 'Detailed'
+          $r = Invoke-Pester -Configuration $c
+          "### Pester: $($r.PassedCount) passed, $($r.FailedCount) failed" >> $env:GITHUB_STEP_SUMMARY
+          if ($r.FailedCount -gt 0) { throw "$($r.FailedCount) Pester test(s) failed." }
+
       # The repo tree deliberately contains no template instances, so the
       # A9 instance rule and the SYSTEMNAME group/location wiring are never
       # exercised by the steps above. This builds throwaway instances in a

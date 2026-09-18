@@ -49,12 +49,19 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+Import-Module (Join-Path (Split-Path $PSScriptRoot -Parent) 'Tools/VcioCaCommon.psm1') -Force
+
 # ---------------------------------------------------------------- gate model
 # Each gate names the checks that are FAIL at that gate. Anything a check
 # reports that is not in this list degrades to INFO.
 $GateFailChecks = @{
+    # Finding 4 — SecurityDefaults is NOT here. A tenant on Security Defaults
+    # is the normal starting state, and the correct move is the two-gate B5
+    # procedure, not "turn them off and re-run". Failing PreImport on it told
+    # the operator to open exactly the unprotected window B5 exists to close.
+    # It gates PostSwitch, and only PostSwitch.
     PreImport = @(
-        'SecurityDefaults','IntuneEnrollSP','TAP'
+        'IntuneEnrollSP','TAP'
     )
     # B5 — SD may still be enabled here. That is why 'SecurityDefaults' is
     # absent from this list and present in PostSwitch's.
@@ -215,21 +222,25 @@ if (-not $bgGroup) {
         Write-Check -Id 'BreakGlassMembership' -Name 'Break-glass membership (>= 2 accounts)' -Result 'PASS' -Detail "$($bgMembers.Count) members"
     }
 
-    # B2 — the Global Administrator assignment must be PERMANENT, and it must be
-    # read through role management. Get-MgDirectoryRoleMember shows the role's
-    # current members and does not distinguish an active PIM activation from a
-    # standing assignment: a break-glass account whose GA is merely ELIGIBLE
-    # cannot activate it during the outage that break-glass exists for.
-    $gaAssignments = @()
-    $gaEligible = @()
+    # B2 / finding 5 — the Global Administrator assignment must be STANDING.
+    # Evidence is roleAssignmentScheduleInstances: assignmentType 'Assigned'
+    # with no endDateTime. Plain roleAssignments cannot tell a standing grant
+    # from an ACTIVATED PIM eligibility — both appear as assignments — and an
+    # activated eligibility is worthless here, because activation needs the
+    # very sign-in path that is broken when break-glass is used.
+    #
+    # assignmentType and endDateTime are filtered client-side (in
+    # Test-VcioPermanentRoleAssignment) rather than in the OData filter:
+    # server-side support for those properties is inconsistent, and a filter
+    # the service silently ignores would hand us an unfiltered set that looks
+    # like a filtered one.
+    $gaInstances = @()
+    $gaReadFailed = $null
     try {
-        $gaAssignments = @(Get-MgRoleManagementDirectoryRoleAssignment `
+        $gaInstances = @(Get-MgRoleManagementDirectoryRoleAssignmentScheduleInstance `
             -Filter "roleDefinitionId eq '$GLOBAL_ADMIN_ROLE'" -All -ErrorAction Stop)
-        $gaEligible = @(Get-MgRoleManagementDirectoryRoleEligibilitySchedule `
-            -Filter "roleDefinitionId eq '$GLOBAL_ADMIN_ROLE'" -All -ErrorAction SilentlyContinue)
     } catch {
-        Write-Check -Id 'BreakGlassGlobalAdminPermanent' -Name 'Break-glass permanent Global Administrator' -Result 'FAIL' `
-            -Detail "Could not read role assignments: $($_.Exception.Message). Needs RoleManagement.Read.Directory."
+        $gaReadFailed = $_.Exception.Message
     }
 
     foreach ($m in $bgMembers) {
@@ -243,18 +254,18 @@ if (-not $bgGroup) {
             Write-Check -Id 'BreakGlassCloudOnly' -Name "Break-glass cloud-only + enabled: $upn" -Result 'PASS'
         }
 
-        if ($gaAssignments.Count) {
-            $hasPermanent = @($gaAssignments | Where-Object { $_.PrincipalId -eq $m.Id }).Count -gt 0
-            $onlyEligible = @($gaEligible | Where-Object { $_.PrincipalId -eq $m.Id }).Count -gt 0
-            if ($hasPermanent) {
-                Write-Check -Id 'BreakGlassGlobalAdminPermanent' -Name "Break-glass permanent Global Administrator: $upn" -Result 'PASS'
-            } elseif ($onlyEligible) {
-                Write-Check -Id 'BreakGlassGlobalAdminPermanent' -Name "Break-glass permanent Global Administrator: $upn" -Result 'FAIL' `
-                    -Detail 'Global Administrator is PIM-ELIGIBLE, not permanent. Activation needs the very sign-in path that is broken when break-glass is used. Make it a standing assignment.'
-            } else {
-                Write-Check -Id 'BreakGlassGlobalAdminPermanent' -Name "Break-glass permanent Global Administrator: $upn" -Result 'FAIL' `
-                    -Detail 'No Global Administrator assignment found for this account.'
-            }
+        # Evaluated for EVERY member, always. An unreadable or empty instance
+        # set is a FAIL for each of them — never a skip. The previous
+        # `if ($gaAssignments.Count)` wrapper meant an empty result silently
+        # produced no check at all, and the gate passed on no evidence.
+        if ($gaReadFailed) {
+            Write-Check -Id 'BreakGlassGlobalAdminPermanent' -Name "Break-glass permanent Global Administrator: $upn" -Result 'FAIL' `
+                -Detail "Could not read role-assignment schedule instances: $gaReadFailed. Needs RoleManagement.Read.Directory. Unreadable is not passable."
+        } else {
+            $ga = Test-VcioPermanentRoleAssignment -PrincipalId $m.Id -ScheduleInstances $gaInstances
+            Write-Check -Id 'BreakGlassGlobalAdminPermanent' `
+                -Name "Break-glass permanent Global Administrator: $upn" `
+                -Result $(if ($ga.Pass) { 'PASS' } else { 'FAIL' }) -Detail $ga.Reason
         }
 
         $fido = Get-MgUserAuthenticationFido2Method -UserId $m.Id -ErrorAction SilentlyContinue
@@ -388,7 +399,9 @@ function Test-ServiceAccountCoverage {
         if ($fencingMode -eq 'Shared') {
             $governing = $sharedFence
         } else {
-            $perSystem = @(Get-MgUserMemberOf -UserId $id -All -ErrorAction SilentlyContinue |
+            # Transitive for the same reason as the scope check below: a
+            # nested membership is still a membership.
+            $perSystem = @(Get-MgUserTransitiveMemberOf -UserId $id -All -ErrorAction SilentlyContinue |
                 Where-Object { $_.AdditionalProperties.displayName -like 'SG-CA-SA-*' })
             if ($perSystem.Count -ne 1) {
                 Write-Check -Id 'ServiceAccountCoverage' -Name "B3a: $upn per-system group" -Result 'FAIL' `
@@ -409,6 +422,47 @@ function Test-ServiceAccountCoverage {
             continue
         }
 
+        # ---- (i) DOES THE FENCE APPLY? A structural question.
+        # Finding 2: this must NOT be read out of the sign-in log. CA500 is
+        # "block, locations = All EXCEPT the fenced ranges", so a well-behaved
+        # account signing in from inside its fence matches no condition and the
+        # policy logs as notApplied. The old check demanded a non-notApplied
+        # result, which only a BLOCKED attempt produces — so it failed exactly
+        # the accounts that were behaving, and an account that never strayed
+        # outside could never pass. The fence applying is a fact about the
+        # policy's assignment, and that is where it is read from.
+        $memberOf = @()
+        try {
+            $memberOf = @(Get-MgUserTransitiveMemberOf -UserId $id -All -ErrorAction Stop |
+                ForEach-Object { $_.Id })
+        } catch {
+            Write-Check -Id 'ServiceAccountCoverage' -Name "B3a: $upn scope" -Result 'FAIL' `
+                -Detail "Could not read transitive group membership: $($_.Exception.Message)"
+            continue
+        }
+        # Transitive, not direct: an account excluded through a NESTED group
+        # would otherwise read as fenced, which is the dangerous direction.
+        $scope = Test-VcioPrincipalInPolicyScope -PrincipalId $id `
+            -PolicyUsers $governing.Conditions.Users -TransitiveGroupIds $memberOf
+        if (-not $scope.InScope) {
+            Write-Check -Id 'ServiceAccountCoverage' -Name "B3a: $upn fence applies" -Result 'FAIL' `
+                -Detail "$($governing.DisplayName) is enabled but does not reach this account — $($scope.Reason) The account is exempt from CA002 and fenced by nothing."
+            continue
+        }
+
+        # ---- (ii) DOES THE FENCE HOLD? Source IP against the location's ranges.
+        $locIds = @(@($governing.Conditions.Locations.ExcludeLocations) | Where-Object { $_ -and $_ -notin @('All','AllTrusted') })
+        $cidrs = @()
+        foreach ($lid in $locIds) {
+            $nl = $allLocations | Where-Object { $_.Id -eq $lid } | Select-Object -First 1
+            $cidrs += @(Get-VcioNamedLocationRanges -NamedLocation $nl)
+        }
+        if (-not $cidrs.Count) {
+            Write-Check -Id 'ServiceAccountCoverage' -Name "B3a: $upn fence ranges" -Result 'FAIL' `
+                -Detail "$($governing.DisplayName)'s governing named location carries no IP ranges. A fence with no ranges is not a fence."
+            continue
+        }
+
         $signIns = @()
         try {
             $signIns = @(Get-MgAuditLogSignIn -Filter "userId eq '$id' and createdDateTime ge $since" -All -ErrorAction Stop)
@@ -417,36 +471,21 @@ function Test-ServiceAccountCoverage {
                 -Detail "Could not read sign-in logs: $($_.Exception.Message)"
             continue
         }
-        if (-not $signIns.Count) {
-            Write-Check -Id 'ServiceAccountCoverage' -Name "B3a: $upn sign-in evidence" -Result 'FAIL' `
-                -Detail 'UNVERIFIED — no sign-ins in the last 30 days, so nothing proves the fence applies to this account. UNVERIFIED does not pass the gate.'
-            continue
-        }
 
-        # (i) the governing fence must actually appear in the applied-policies list
-        $applied = @($signIns | Where-Object {
-            @($_.AppliedConditionalAccessPolicies | Where-Object {
-                $_.Id -eq $governing.Id -and $_.Result -ne 'notApplied'
-            }).Count -gt 0
-        })
-        # (ii) nothing may SUCCEED from outside the governing location
-        $outsideSuccess = @($signIns | Where-Object {
-            $_.Status.ErrorCode -eq 0 -and
-            @($_.AppliedConditionalAccessPolicies | Where-Object {
-                $_.Id -eq $governing.Id -and $_.Result -eq 'notApplied'
-            }).Count -gt 0
-        })
-        $blockedOutside = @($signIns | Where-Object { $_.Status.ErrorCode -ne 0 }).Count
-
-        if (-not $applied.Count) {
-            Write-Check -Id 'ServiceAccountCoverage' -Name "B3a: $upn fence applies" -Result 'FAIL' `
-                -Detail "$($governing.DisplayName) never appears in this account's applied-policies list over $($signIns.Count) sign-in(s). The fence is configured but does not reach the account."
-        } elseif ($outsideSuccess.Count) {
-            Write-Check -Id 'ServiceAccountCoverage' -Name "B3a: $upn fence holds" -Result 'FAIL' `
-                -Detail "$($outsideSuccess.Count) successful sign-in(s) from outside the governing location."
-        } else {
-            Write-Check -Id 'ServiceAccountCoverage' -Name "B3a: $upn fenced and verified" -Result 'PASS' `
-                -Detail "$($applied.Count) sign-in(s) with the fence applied; no success from outside. $blockedOutside blocked attempt(s) — desirable, reported not failed."
+        $fence = Test-VcioSignInsWithinFence -SignIns $signIns -Cidrs $cidrs
+        switch ($fence.Verdict) {
+            'PASS' {
+                Write-Check -Id 'ServiceAccountCoverage' -Name "B3a: $upn fenced and verified" -Result 'PASS' `
+                    -Detail "$($scope.Reason) $($fence.Reason)"
+            }
+            'FAIL' {
+                Write-Check -Id 'ServiceAccountCoverage' -Name "B3a: $upn fence holds" -Result 'FAIL' -Detail $fence.Reason
+            }
+            default {
+                # UNVERIFIED does not pass the gate: no data is not no problem.
+                Write-Check -Id 'ServiceAccountCoverage' -Name "B3a: $upn sign-in evidence" -Result 'FAIL' `
+                    -Detail "UNVERIFIED — $($fence.Reason) UNVERIFIED does not pass the gate."
+            }
         }
     }
 }
@@ -579,9 +618,13 @@ if ($Gate -eq 'Ring3') {
         foreach ($m in @(Get-MgGroupMember -GroupId $privGroup.Id -All)) { $principals[$m.Id] = $true }
     }
     $noPr = @()
-    foreach ($pid in $principals.Keys) {
+    # Finding 1 — this loop variable was $pid, which is the read-only automatic
+    # PID variable. Assigning it throws "Cannot overwrite variable PID because
+    # it is read-only or constant", and with $ErrorActionPreference = 'Stop'
+    # that aborted the whole Ring 3 gate. The check had never run.
+    foreach ($principalId in $principals.Keys) {
         $methods = @()
-        try { $methods = @(Get-MgUserAuthenticationMethod -UserId $pid -ErrorAction Stop) } catch { continue }
+        try { $methods = @(Get-MgUserAuthenticationMethod -UserId $principalId -ErrorAction Stop) } catch { continue }
         $types = @($methods | ForEach-Object { $_.AdditionalProperties.'@odata.type' })
         $isPr = @($types | Where-Object {
             $_ -in @('#microsoft.graph.fido2AuthenticationMethod',
@@ -589,8 +632,8 @@ if ($Gate -eq 'Ring3') {
                      '#microsoft.graph.x509CertificateAuthenticationMethod')
         }).Count -gt 0
         if (-not $isPr) {
-            $u = Get-MgUser -UserId $pid -Property userPrincipalName -ErrorAction SilentlyContinue
-            $noPr += if ($u) { $u.UserPrincipalName } else { $pid }
+            $u = Get-MgUser -UserId $principalId -Property userPrincipalName -ErrorAction SilentlyContinue
+            $noPr += if ($u) { $u.UserPrincipalName } else { $principalId }
         }
     }
     if ($noPr.Count) {

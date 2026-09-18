@@ -81,12 +81,20 @@ $AZ_PRIVILEGED_ROLES = @(
     'Role Based Access Control Administrator'
 )
 
+Import-Module (Join-Path $PSScriptRoot 'VcioCaCommon.psm1') -Force
+
+# Finding 7 — connect to the tenant the MANIFEST names, then prove it. A cached
+# context signed in elsewhere would otherwise have this tool enumerate, and
+# with -RecordResult write about, the wrong tenant. The assertion runs before
+# any read and before any write.
 Write-Host 'Connecting to Microsoft Graph...' -ForegroundColor Cyan
-Connect-MgGraph -Scopes @(
+Connect-MgGraph -TenantId $mf.tenantId -Scopes @(
     'Directory.Read.All','RoleManagement.Read.Directory',
     'RoleEligibilitySchedule.Read.Directory','Group.Read.All','User.Read.All',
     'AdministrativeUnit.Read.All'
 ) -NoWelcome
+$connectedTenant = Assert-VcioTenantContext -ExpectedTenantId $mf.tenantId
+Write-Host "Tenant verified: $connectedTenant" -ForegroundColor Cyan
 
 # --------------------------------------------------------------- helpers
 $principalCache = @{}
@@ -110,8 +118,7 @@ function Expand-Principal([string]$Id) {
     } catch { return @($Id) }
     if ($type -eq '#microsoft.graph.group') {
         try {
-            $members = (Invoke-MgGraphRequest -Method GET `
-                -Uri "https://graph.microsoft.com/v1.0/groups/$Id/transitiveMembers?`$select=id").value
+            $members = Get-VcioGraphCollection -Uri "https://graph.microsoft.com/v1.0/groups/$Id/transitiveMembers?`$select=id&`$top=999"
             foreach ($m in $members) { $out += $m.id }
         } catch { $incomplete.Add("Could not expand group ${Id}: $($_.Exception.Message)") }
     } else {
@@ -133,13 +140,16 @@ function Add-Privileged([string]$Id, [string]$Reason) {
 }
 
 $roleDefs = @{}
-foreach ($rd in (Invoke-MgGraphRequest -Method GET `
-        -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?$top=999').value) {
+# Finding 3 — every one of these is a PAGED collection. $top=999 returns a
+# first page, and "the first 999 holders do not include anyone else" is not
+# the same statement as "nobody else holds this role". Get-VcioGraphCollection
+# follows @odata.nextLink to the end and throws rather than return a partial
+# set silently.
+foreach ($rd in (Get-VcioGraphCollection -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?$top=999')) {
     $roleDefs[$rd.id] = $rd
 }
 
-foreach ($a in (Invoke-MgGraphRequest -Method GET `
-        -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?$top=999').value) {
+foreach ($a in (Get-VcioGraphCollection -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?$top=999')) {
     $rd = $roleDefs[$a.roleDefinitionId]
     $isBuiltIn = $rd -and $rd.isBuiltIn
     $scopeNote = if ($a.directoryScopeId -and $a.directoryScopeId -ne '/') { " (AU-scoped $($a.directoryScopeId))" } else { '' }
@@ -157,8 +167,7 @@ foreach ($a in (Invoke-MgGraphRequest -Method GET `
 }
 
 try {
-    foreach ($e in (Invoke-MgGraphRequest -Method GET `
-            -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleEligibilitySchedules?$top=999').value) {
+    foreach ($e in (Get-VcioGraphCollection -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleEligibilitySchedules?$top=999')) {
         $rd = $roleDefs[$e.roleDefinitionId]
         $isBuiltIn = $rd -and $rd.isBuiltIn
         $scopeNote = if ($e.directoryScopeId -and $e.directoryScopeId -ne '/') { " (AU-scoped $($e.directoryScopeId))" } else { '' }
@@ -201,7 +210,7 @@ authorizationresources
 | where tostring(action) =~ 'Microsoft.Authorization/roleAssignments/write' or tostring(action) == '*'
 | distinct roleName, id
 "@
-        $customPrivilegedRoles = @(Search-AzGraph -Query $q -First 1000)
+        $customPrivilegedRoles = @(Invoke-VcioAzGraphQuery -Query $q)
     } catch { $incomplete.Add("Custom role definition query failed: $($_.Exception.Message)") }
 
     $privilegedRoleNames = $AZ_PRIVILEGED_ROLES + @($customPrivilegedRoles | ForEach-Object { $_.roleName })
@@ -222,21 +231,51 @@ authorizationresources
 | where roleName in~ ($nameList)
 | project principalId, roleName, scope
 "@
-        foreach ($r in @(Search-AzGraph -Query $q2 -First 5000)) {
+        # -First 5000 was not a large page — Search-AzGraph caps -First at
+        # 1000 and rejects anything higher, so this query was erroring rather
+        # than truncating. Invoke-VcioAzGraphQuery pages at 1000.
+        foreach ($r in @(Invoke-VcioAzGraphQuery -Query $q2)) {
             Add-Privileged $r.principalId "Azure RBAC '$($r.roleName)' at $($r.scope) (active)"
         }
     } catch { $incomplete.Add("Azure RBAC assignment query failed: $($_.Exception.Message)") }
 
-    # PIM-eligible Azure assignments are not in Resource Graph.
+    # PIM-eligible Azure assignments are not in Resource Graph, and the REST
+    # collection is paged via nextLink. Finding 3: this must cover MANAGEMENT
+    # GROUP scope as well as subscriptions — an Owner eligibility at a
+    # management group is inherited by every subscription beneath it and was
+    # previously invisible to this tool entirely.
+    function Get-AzEligibilityAtScope([string]$Scope, [string]$Label) {
+        $rows = @()
+        $path = "$Scope/providers/Microsoft.Authorization/roleEligibilityScheduleInstances?api-version=2020-10-01&`$filter=atScope()"
+        $pages = 0
+        while ($path -and $pages -lt 200) {
+            $resp = Invoke-AzRestMethod -Path $path -Method GET
+            $pages++
+            if ($resp.StatusCode -ne 200) { throw "HTTP $($resp.StatusCode)" }
+            $body = $resp.Content | ConvertFrom-Json
+            foreach ($v in @($body.value)) { if ($v) { $rows += $v } }
+            $path = $null
+            if ($body.PSObject.Properties.Name -contains 'nextLink' -and $body.nextLink) {
+                # nextLink is absolute; Invoke-AzRestMethod -Path wants the path.
+                $path = ([uri]$body.nextLink).PathAndQuery
+            }
+        }
+        foreach ($r in $rows) { Add-Privileged $r.properties.principalId "Azure RBAC eligible at $Label" }
+        $rows.Count
+    }
+
+    foreach ($mg in @($mf.expectedAzureScope.managementGroups)) {
+        if (-not $mg) { continue }
+        try {
+            [void](Get-AzEligibilityAtScope "/providers/Microsoft.Management/managementGroups/$mg" "management group $mg")
+        } catch {
+            $incomplete.Add("Management group '$mg': could not read PIM eligibility — $($_.Exception.Message)")
+        }
+    }
     foreach ($sub in @($mf.expectedAzureScope.subscriptions)) {
         if (-not $sub.id) { continue }
         try {
-            $uri = "/subscriptions/$($sub.id)/providers/Microsoft.Authorization/roleEligibilityScheduleInstances?api-version=2020-10-01&`$filter=atScope()"
-            $resp = Invoke-AzRestMethod -Path $uri -Method GET
-            if ($resp.StatusCode -ne 200) { throw "HTTP $($resp.StatusCode)" }
-            foreach ($v in (($resp.Content | ConvertFrom-Json).value)) {
-                Add-Privileged $v.properties.principalId "Azure RBAC eligible at subscription $($sub.name)"
-            }
+            [void](Get-AzEligibilityAtScope "/subscriptions/$($sub.id)" "subscription $($sub.name)")
         } catch {
             $incomplete.Add("Subscription '$($sub.name)' ($($sub.id)): could not read PIM eligibility — $($_.Exception.Message)")
         }
@@ -246,7 +285,7 @@ authorizationresources
     $expectedSubs = @($mf.expectedAzureScope.subscriptions | ForEach-Object { $_.id })
     $liveSubs = @()
     try {
-        $liveSubs = @(Search-AzGraph -Query 'resourcecontainers | where type =~ "microsoft.resources/subscriptions" | project subscriptionId, name' -First 1000)
+        $liveSubs = @(Invoke-VcioAzGraphQuery -Query 'resourcecontainers | where type =~ "microsoft.resources/subscriptions" | project subscriptionId, name')
     } catch { $incomplete.Add("Could not enumerate subscriptions: $($_.Exception.Message)") }
     foreach ($s in $liveSubs) {
         if ($s.subscriptionId -notin $expectedSubs) {
@@ -271,12 +310,19 @@ authorizationresources
 
 # --------------------------------------------------------------- 3. diff
 Write-Host 'Diffing against SG-CA-Privileged...' -ForegroundColor Cyan
-$privGroup = Get-MgGroup -Filter "displayName eq 'SG-CA-Privileged'" -ErrorAction SilentlyContinue | Select-Object -First 1
+# Finding 7 — manifest object id first. Resolving by displayName would happily
+# find a group someone renamed or duplicated.
+$privRef = Resolve-VcioObjectId -Manifest $mf -Kind 'groups' -Name 'SG-CA-Privileged' -Fallback {
+    param($n) (Get-MgGroup -Filter "displayName eq '$n'" -ErrorAction SilentlyContinue | Select-Object -First 1).Id
+}
 $inGroup = @()
-if ($privGroup) {
-    $inGroup = @(Get-MgGroupMember -GroupId $privGroup.Id -All | ForEach-Object { $_.Id })
+if ($privRef.Id) {
+    if ($privRef.Source -eq 'displayName-fallback') {
+        Write-Host "  NOTE: SG-CA-Privileged resolved by displayName fallback (no id in manifest.objectIds.groups). Record its tenant object id." -ForegroundColor Yellow
+    }
+    $inGroup = @(Get-MgGroupMember -GroupId $privRef.Id -All | ForEach-Object { $_.Id })
 } else {
-    $incomplete.Add('SG-CA-Privileged not found in the tenant.')
+    $incomplete.Add('SG-CA-Privileged could not be resolved from the manifest or by displayName.')
 }
 
 foreach ($p in $privileged.Keys) {

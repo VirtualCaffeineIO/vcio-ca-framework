@@ -71,9 +71,9 @@ Gate PreImport: 8 pass, 0 warn, 1 info (not gating here), 0 fail
 Gate PreImport PASSED.
 ```
 
-> **On Security Defaults today?** Do **not** disable them yet. Read [Switching from Security Defaults](#phase-b2--switching-from-security-defaults) below first — the switch is a separate two-gate procedure and the order matters more than the speed.
+> **On Security Defaults today?** Do **not** disable them yet, and note that `PreImport` does **not** fail on them — a tenant running Security Defaults is the normal starting state for this procedure, not a fault to clear before importing. Switching them off here would open the unprotected window that [Switching from Security Defaults](#phase-b2--switching-from-security-defaults) exists to close: the policies are still report-only at this point, so the tenant would have neither Security Defaults nor enforced Conditional Access. The gate reports their state as INFO and moves on. Read Phase B2 below before touching them — `SecurityDefaults` is a FAIL at `PostSwitch`, and nowhere else.
 
-`-Fix` created: the Intune Enrollment service principal (if missing), enabled Temporary Access Pass, the two managed-app filters, and all three App Protection baselines (created via Graph because IntuneManagement cannot import the Windows MAM type). If security defaults show FAIL, disable them (Entra ID → Properties) and re-run.
+`-Fix` created: the Intune Enrollment service principal (if missing), enabled Temporary Access Pass, the two managed-app filters, and all three App Protection baselines (created via Graph because IntuneManagement cannot import the Windows MAM type).
 
 ---
 

@@ -20,6 +20,7 @@
     "and Prereqs/Invoke-VcioCaPrereqs.ps1 reads fencingMode for gate B3a."
   ],
 
+  "_tenantId": "Load-bearing, not documentation. Every tool connects with Connect-MgGraph -TenantId from this field and then asserts the live Graph context matches it, stopping before any read or write if it does not. A tool pointed at the wrong tenant by a stale cached context is the failure this makes impossible.",
   "tenantId": "00000000-0000-0000-0000-000000000000",
   "tenantDomain": "contoso.onmicrosoft.com",
   "frameworkVersion": "2026.9.1",
@@ -57,6 +58,7 @@
   "transition": {
     "exitDate": "2027-03-31",
     "groupId": "00000000-0000-0000-0000-000000000000",
+    "_verifiedRemovals": "Written by Tools/Invoke-VcioTransitionExit.ps1, one entry per removed user: { upn, id, removedAt, verified }. removedAt is a precise UTC instant (yyyy-MM-ddTHH:mm:ss.fffZ) persisted BEFORE the removal it describes, so a run that dies halfway resumes correctly and a sign-in from before the removal can never be mistaken for evidence of post-removal coverage.",
     "groupEmptiedDate": null,
     "policyIds": {
       "CA200-VCIO-Users-Windows-CompliantOrHybrid-TRANSITION": "00000000-0000-0000-0000-000000000000",
