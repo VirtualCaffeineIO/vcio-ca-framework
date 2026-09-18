@@ -273,67 +273,264 @@ Describe 'Finding 5 — break-glass Global Administrator must be standing' {
 }
 
 # ==========================================================================
-Describe 'Finding 6 — post-removal coverage needs an ENFORCED result' {
+Describe 'Finding 6A — per-sign-in, per-policy coverage' {
 
     BeforeAll {
-        $script:Ids = @{ 'p200'='CA200'; 'p204'='CA204'; 'p300'='CA300'; 'p301'='CA301' }
+        # The four standard policies as they actually ship. CA200 has NO
+        # compliant-device filter; the other three do, which is why notApplied
+        # means different things on them.
+        $script:Std = @(
+            [pscustomobject]@{ Id='p200'; DisplayName='CA200'; ClientAppTypes=@('mobileAppsAndDesktopClients'); IncludePlatforms=@('windows'); HasCompliantDeviceFilter=$false }
+            [pscustomobject]@{ Id='p204'; DisplayName='CA204'; ClientAppTypes=@('all');                          IncludePlatforms=@();          HasCompliantDeviceFilter=$true  }
+            [pscustomobject]@{ Id='p300'; DisplayName='CA300'; ClientAppTypes=@('browser');                      IncludePlatforms=@();          HasCompliantDeviceFilter=$true  }
+            [pscustomobject]@{ Id='p301'; DisplayName='CA301'; ClientAppTypes=@('browser');                      IncludePlatforms=@('windows'); HasCompliantDeviceFilter=$true  }
+        )
         $script:RemovedAt = [datetime]::Parse('2026-09-10T12:00:00Z').ToUniversalTime()
-        function AllFour([string]$Result, [datetime]$When) {
-            @(New-SignIn -Ip '1.2.3.4' -ErrorCode 0 -When $When -Applied @(
-                (New-AppliedPolicy -Id 'p200' -Result $Result), (New-AppliedPolicy -Id 'p204' -Result $Result),
-                (New-AppliedPolicy -Id 'p300' -Result $Result), (New-AppliedPolicy -Id 'p301' -Result $Result)))
+        function Sign {
+            param([string]$App, [string]$Os, [bool]$Compliant, [int]$MinutesAfter, [hashtable]$Results)
+            [pscustomobject]@{
+                CreatedDateTime = $script:RemovedAt.AddMinutes($MinutesAfter)
+                ClientAppUsed   = $App
+                DeviceDetail    = [pscustomobject]@{ OperatingSystem = $Os; IsCompliant = $Compliant }
+                AppliedConditionalAccessPolicies = @($Results.GetEnumerator() | ForEach-Object {
+                    [pscustomobject]@{ Id = $_.Key; Result = $_.Value } })
+            }
         }
     }
 
-    It 'a PRE-removal sign-in is rejected' {
-        $s = AllFour 'success' $script:RemovedAt.AddMinutes(-5)
-        $r = Test-VcioStandardCoverage -SignIns $s -PolicyIdToName $script:Ids -RemovedAt $script:RemovedAt
-        $r.Verified | Should -BeFalse
-        $r.SignInsConsidered | Should -Be 0
-    }
-    It 'a sign-in exactly AT the removal instant is rejected (strictly after)' {
-        $s = AllFour 'success' $script:RemovedAt
-        (Test-VcioStandardCoverage -SignIns $s -PolicyIdToName $script:Ids -RemovedAt $script:RemovedAt).Verified | Should -BeFalse
-    }
-    It 'a reportOnlySuccess result is rejected' {
-        $s = AllFour 'reportOnlySuccess' $script:RemovedAt.AddMinutes(5)
-        $r = Test-VcioStandardCoverage -SignIns $s -PolicyIdToName $script:Ids -RemovedAt $script:RemovedAt
-        $r.Verified | Should -BeFalse
-        $r.Missing.Count | Should -Be 4
-    }
-    It 'a notApplied result is rejected' {
-        $s = AllFour 'notApplied' $script:RemovedAt.AddMinutes(5)
-        (Test-VcioStandardCoverage -SignIns $s -PolicyIdToName $script:Ids -RemovedAt $script:RemovedAt).Verified | Should -BeFalse
-    }
-    It 'enforced success after removal is accepted' {
-        $s = AllFour 'success' $script:RemovedAt.AddMinutes(5)
-        (Test-VcioStandardCoverage -SignIns $s -PolicyIdToName $script:Ids -RemovedAt $script:RemovedAt).Verified | Should -BeTrue
-    }
-    It 'enforced failure also counts as enforced' {
-        $s = AllFour 'failure' $script:RemovedAt.AddMinutes(5)
-        (Test-VcioStandardCoverage -SignIns $s -PolicyIdToName $script:Ids -RemovedAt $script:RemovedAt).Verified | Should -BeTrue
-    }
-    It 'accumulates across sign-ins, because the four cannot co-occur on one' {
-        # CA200 is mobileAppsAndDesktopClients; CA300/301 are browser.
-        $desktop = New-SignIn -Ip '1.2.3.4' -ErrorCode 0 -When $script:RemovedAt.AddMinutes(5) -Applied @(
-            (New-AppliedPolicy -Id 'p200' -Result 'success'), (New-AppliedPolicy -Id 'p204' -Result 'success'))
-        $browser = New-SignIn -Ip '1.2.3.4' -ErrorCode 0 -When $script:RemovedAt.AddMinutes(9) -Applied @(
-            (New-AppliedPolicy -Id 'p300' -Result 'success'), (New-AppliedPolicy -Id 'p301' -Result 'success'))
-        $r = Test-VcioStandardCoverage -SignIns @($desktop,$browser) -PolicyIdToName $script:Ids -RemovedAt $script:RemovedAt
+    It 'a compliant-device user with desktop and browser sign-ins verifies' {
+        # Desktop: CA200 enforced success; CA204 notApplied, which is CORRECT
+        # because the device is compliant and CA204 filters compliant devices out.
+        $desktop = Sign -App 'Mobile Apps and Desktop clients' -Os 'Windows 10' -Compliant $true -MinutesAfter 45 `
+            -Results @{ p200='success'; p204='notApplied' }
+        # Browser: CA300/CA301 notApplied for the same reason; CA204 likewise.
+        $browser = Sign -App 'Browser' -Os 'Windows 10' -Compliant $true -MinutesAfter 50 `
+            -Results @{ p204='notApplied'; p300='notApplied'; p301='notApplied' }
+        $r = Test-VcioStandardCoverage -SignIns @($desktop,$browser) -Policies $script:Std -RemovedAt $script:RemovedAt
+        $r.Failures -join ' | ' | Should -BeExactly ''
         $r.Verified | Should -BeTrue
     }
-    It 'one missing policy leaves the user unverified' {
-        $partial = New-SignIn -Ip '1.2.3.4' -ErrorCode 0 -When $script:RemovedAt.AddMinutes(5) -Applied @(
-            (New-AppliedPolicy -Id 'p200' -Result 'success'), (New-AppliedPolicy -Id 'p204' -Result 'success'),
-            (New-AppliedPolicy -Id 'p300' -Result 'success'))
-        $r = Test-VcioStandardCoverage -SignIns @($partial) -PolicyIdToName $script:Ids -RemovedAt $script:RemovedAt
-        $r.Verified | Should -BeFalse
-        $r.Missing | Should -Be @('CA301')
+
+    It 'a non-compliant hybrid user with a CA200 failure and a CA204 success verifies' {
+        $s = Sign -App 'Mobile Apps and Desktop clients' -Os 'Windows 10' -Compliant $false -MinutesAfter 40 `
+            -Results @{ p200='failure'; p204='success' }
+        $r = Test-VcioStandardCoverage -SignIns @($s) -Policies $script:Std -RemovedAt $script:RemovedAt
+        $r.Failures -join ' | ' | Should -BeExactly ''
+        $r.Verified | Should -BeTrue
     }
-    It 'the exit script records a precise UTC removal instant, not a date' {
-        $src = Get-Content -Raw (Join-Path $script:Root 'Tools/Invoke-VcioTransitionExit.ps1')
-        $src | Should -Match "removedAt\s*=\s*\`$removedAt"
-        $src | Should -Match "UtcNow\.ToString\('yyyy-MM-ddTHH:mm:ss\.fffZ'\)"
+
+    It 'a sign-in inside the 30-minute margin is ignored' {
+        $s = Sign -App 'Mobile Apps and Desktop clients' -Os 'Windows 10' -Compliant $false -MinutesAfter 5 `
+            -Results @{ p200='success'; p204='success' }
+        $r = Test-VcioStandardCoverage -SignIns @($s) -Policies $script:Std -RemovedAt $script:RemovedAt
+        $r.SignInsConsidered      | Should -Be 0
+        $r.SignInsIgnoredInMargin | Should -Be 1
+        $r.Verified               | Should -BeFalse
+    }
+
+    It 'the margin is a parameter — 0 considers the same sign-in' {
+        $s = Sign -App 'Mobile Apps and Desktop clients' -Os 'Windows 10' -Compliant $false -MinutesAfter 5 `
+            -Results @{ p200='success'; p204='success' }
+        $r = Test-VcioStandardCoverage -SignIns @($s) -Policies $script:Std -RemovedAt $script:RemovedAt -PropagationMinutes 0
+        $r.SignInsConsidered | Should -Be 1
+        $r.Verified          | Should -BeTrue
+    }
+
+    It 'a reportOnly CA300 result fails the user and is reported as a configuration defect' {
+        $s = Sign -App 'Browser' -Os 'Windows 10' -Compliant $false -MinutesAfter 45 `
+            -Results @{ p204='success'; p300='reportOnlySuccess'; p301='success' }
+        $r = Test-VcioStandardCoverage -SignIns @($s) -Policies $script:Std -RemovedAt $script:RemovedAt
+        $r.Verified | Should -BeFalse
+        ($r.Failures -join ' ')             | Should -Match 'report-only'
+        ($r.ConfigurationDefects -join ' ') | Should -Match 'CA300'
+        ($r.ConfigurationDefects -join ' ') | Should -Match 'not enforcing'
+    }
+
+    It 'a notApplied CA200 fails — CA200 has no compliant-device filter to explain it' {
+        $s = Sign -App 'Mobile Apps and Desktop clients' -Os 'Windows 10' -Compliant $true -MinutesAfter 45 `
+            -Results @{ p200='notApplied'; p204='notApplied' }
+        $r = Test-VcioStandardCoverage -SignIns @($s) -Policies $script:Std -RemovedAt $script:RemovedAt
+        $r.Verified | Should -BeFalse
+        ($r.Failures -join ' ') | Should -Match 'CA200'
+        ($r.Failures -join ' ') | Should -Match 'carries no compliant-device filter'
+    }
+
+    It 'notApplied on a filtered policy fails when the device is NOT compliant' {
+        $s = Sign -App 'Browser' -Os 'Windows 10' -Compliant $false -MinutesAfter 45 `
+            -Results @{ p204='notApplied'; p300='notApplied'; p301='notApplied' }
+        $r = Test-VcioStandardCoverage -SignIns @($s) -Policies $script:Std -RemovedAt $script:RemovedAt
+        $r.Verified | Should -BeFalse
+        ($r.Failures -join ' ') | Should -Match 'not compliant'
+    }
+
+    It 'non-matching pairs are skipped — a browser sign-in says nothing about CA200' {
+        $s = Sign -App 'Browser' -Os 'Windows 10' -Compliant $true -MinutesAfter 45 `
+            -Results @{ p204='notApplied'; p300='notApplied'; p301='notApplied' }
+        $r = Test-VcioStandardCoverage -SignIns @($s) -Policies $script:Std -RemovedAt $script:RemovedAt
+        $r.Verified | Should -BeTrue      # CA200 never matched, so it is not held against the user
+        $r.MatchingPairs | Should -Be 3
+    }
+
+    It 'a macOS browser sign-in does not match the Windows-only CA301' {
+        $s = Sign -App 'Browser' -Os 'MacOs 14' -Compliant $true -MinutesAfter 45 `
+            -Results @{ p204='notApplied'; p300='notApplied' }
+        $r = Test-VcioStandardCoverage -SignIns @($s) -Policies $script:Std -RemovedAt $script:RemovedAt
+        $r.MatchingPairs | Should -Be 2   # CA204 and CA300 only
+        $r.Verified      | Should -BeTrue
+    }
+
+    It 'a matching policy absent from the applied list fails — absence is not coverage' {
+        $s = Sign -App 'Mobile Apps and Desktop clients' -Os 'Windows 10' -Compliant $true -MinutesAfter 45 `
+            -Results @{ p204='notApplied' }
+        $r = Test-VcioStandardCoverage -SignIns @($s) -Policies $script:Std -RemovedAt $script:RemovedAt
+        $r.Verified | Should -BeFalse
+        ($r.Failures -join ' ') | Should -Match 'absent from its applied-policies list'
+    }
+
+    It 'no considered sign-in means not verified' {
+        (Test-VcioStandardCoverage -SignIns @() -Policies $script:Std -RemovedAt $script:RemovedAt).Verified | Should -BeFalse
+    }
+}
+
+# ==========================================================================
+Describe 'Finding 6B — removal state machine' {
+
+    BeforeAll {
+        $script:Harness = Join-Path $PSScriptRoot 'Fixtures/TransitionExitHarness.ps1'
+        $script:Target  = Join-Path $script:Root 'Tools/Invoke-VcioTransitionExit.ps1'
+
+        function New-Scenario {
+            param([string[]]$Members, [string[]]$ThrowOn = @())
+            $dir = Join-Path ([System.IO.Path]::GetTempPath()) ("vcio-6b-" + [guid]::NewGuid())
+            New-Item -ItemType Directory -Path $dir | Out-Null
+            $state = @{
+                tenantId = 'tenant-abc'
+                usersGroupId = 'g-users'
+                members = $Members
+                usersGroupMembers = $Members
+                throwOn = $ThrowOn
+                removeLog = @()
+                disabled = @()
+                signIns = @()
+                policies = @(
+                    @{ id='p200'; displayName='CA200-VCIO-Users-Windows-CompliantDevice';          state='enabled'; clientAppTypes=@('mobileAppsAndDesktopClients'); includePlatforms=@('windows'); filterRule=$null }
+                    @{ id='p204'; displayName='CA204-VCIO-Users-SessionHygiene-Unmanaged';         state='enabled'; clientAppTypes=@('all');                          includePlatforms=@();          filterRule='device.isCompliant -eq True' }
+                    @{ id='p300'; displayName='CA300-VCIO-BYOD-BrowserSessionControls';            state='enabled'; clientAppTypes=@('browser');                      includePlatforms=@();          filterRule='device.isCompliant -eq True' }
+                    @{ id='p301'; displayName='CA301-VCIO-BYOD-Windows-RequireAppProtection';      state='enabled'; clientAppTypes=@('browser');                      includePlatforms=@('windows'); filterRule='device.isCompliant -eq True' }
+                )
+            }
+            $stateFile = Join-Path $dir 'state.json'
+            $state | ConvertTo-Json -Depth 10 | Set-Content $stateFile
+            $manifest = Join-Path $dir 'manifest.json'
+            @{  tenantId = 'tenant-abc'
+                transition = @{ exitDate = '2020-01-01'; groupId = 'g-transition'; groupEmptiedDate = $null
+                                policyIds = @{
+                                    'CA200-VCIO-Users-Windows-CompliantOrHybrid-TRANSITION'   = 't200'
+                                    'CA204-VCIO-Users-SessionHygiene-Unmanaged-TRANSITION'    = 't204'
+                                    'CA300-VCIO-BYOD-BrowserSessionControls-TRANSITION'       = 't300'
+                                    'CA301-VCIO-BYOD-Windows-RequireAppProtection-TRANSITION' = 't301' }
+                                verifiedRemovals = @() }
+                objectIds = @{ groups = @{ 'SG-CA-Transition-Hybrid'='g-transition'; 'SG-CA-Users'='g-users' }
+                               policies = @{
+                                    'CA200-VCIO-Users-Windows-CompliantDevice'       = 'p200'
+                                    'CA204-VCIO-Users-SessionHygiene-Unmanaged'      = 'p204'
+                                    'CA300-VCIO-BYOD-BrowserSessionControls'         = 'p300'
+                                    'CA301-VCIO-BYOD-Windows-RequireAppProtection'   = 'p301' }
+                               namedLocations = @{} }
+            } | ConvertTo-Json -Depth 10 | Set-Content $manifest
+            [pscustomobject]@{ Dir=$dir; StateFile=$stateFile; Manifest=$manifest }
+        }
+        function Invoke-Run([object]$S) {
+            & pwsh -NoProfile -File $script:Harness -StateFile $S.StateFile -Manifest $S.Manifest -ScriptPath $script:Target *>&1 | Out-String
+        }
+        function Read-Manifest([object]$S) { Get-Content -Raw $S.Manifest | ConvertFrom-Json }
+        function Read-State([object]$S)    { Get-Content -Raw $S.StateFile | ConvertFrom-Json }
+        # ConvertFrom-Json in PS7 turns an ISO-8601 string into a [datetime]
+        # on its own. Re-Parsing one round-trips it through a second-precision
+        # culture string and silently drops the milliseconds this test is about.
+        function AsUtc($Value) {
+            if ($Value -is [datetime]) { return ([datetime]$Value).ToUniversalTime() }
+            [datetime]::Parse([string]$Value, [cultureinfo]::InvariantCulture,
+                [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor
+                [System.Globalization.DateTimeStyles]::AssumeUniversal)
+        }
+    }
+
+    It 'a removal that throws leaves that user PENDING, and the others removed' {
+        $s = New-Scenario -Members @('u1','u2','u3') -ThrowOn @('u2')
+        try {
+            $out = Invoke-Run $s
+            $mf = Read-Manifest $s
+            $byId = @{}; foreach ($e in $mf.transition.verifiedRemovals) { $byId[$e.id] = $e }
+
+            $byId['u2'].state | Should -Be 'pending'
+            $byId['u1'].state | Should -Be 'removed'
+            $byId['u3'].state | Should -Be 'removed'
+            # and u2 is genuinely still in the group
+            (Read-State $s).members | Should -Contain 'u2'
+        } finally { Remove-Item -Recurse -Force $s.Dir -ErrorAction SilentlyContinue }
+    }
+
+    It 'groupEmptiedDate is absent while anyone is still a member' {
+        $s = New-Scenario -Members @('u1','u2','u3') -ThrowOn @('u2')
+        try {
+            Invoke-Run $s | Out-Null
+            (Read-Manifest $s).transition.groupEmptiedDate | Should -BeNullOrEmpty
+        } finally { Remove-Item -Recurse -Force $s.Dir -ErrorAction SilentlyContinue }
+    }
+
+    It 'the next run RETRIES the pending user rather than skipping it, and then writes groupEmptiedDate' {
+        $s = New-Scenario -Members @('u1','u2','u3') -ThrowOn @('u2')
+        try {
+            Invoke-Run $s | Out-Null
+            # Clear the fault, same membership, run again.
+            $st = Read-State $s; $st.throwOn = @(); $st | ConvertTo-Json -Depth 10 | Set-Content $s.StateFile
+
+            Invoke-Run $s | Out-Null
+            $mf = Read-Manifest $s
+            $u2 = @($mf.transition.verifiedRemovals | Where-Object { $_.id -eq 'u2' })[0]
+
+            $u2.state | Should -Be 'removed'      # retried, not skipped
+            $u2.removedAt | Should -Not -BeNullOrEmpty
+            (Read-State $s).members.Count | Should -Be 0
+            $mf.transition.groupEmptiedDate | Should -Not -BeNullOrEmpty
+        } finally { Remove-Item -Recurse -Force $s.Dir -ErrorAction SilentlyContinue }
+    }
+
+    It 'removedAt is stamped AFTER the API call returns, not before it' {
+        $s = New-Scenario -Members @('u1')
+        try {
+            Invoke-Run $s | Out-Null
+            $mf = Read-Manifest $s
+            $entry = @($mf.transition.verifiedRemovals | Where-Object { $_.id -eq 'u1' })[0]
+            $calledAt = @((Read-State $s).removeLog | Where-Object { $_.id -eq 'u1' })[0].calledAt
+
+            $removed   = AsUtc $entry.removedAt
+            $called    = AsUtc $calledAt
+            $attempted = AsUtc $entry.attemptedAt
+
+            # removedAt AFTER the call returned, attemptedAt BEFORE it started:
+            # the first makes a pre-removal sign-in unusable as evidence, the
+            # second makes a crashed run resumable.
+            $removed   | Should -BeGreaterThan $called
+            $attempted | Should -BeLessOrEqual $called
+        } finally { Remove-Item -Recurse -Force $s.Dir -ErrorAction SilentlyContinue }
+    }
+
+    It 'a pending entry whose user is no longer a member is reconciled, not left stuck' {
+        $s = New-Scenario -Members @('u1','u2') -ThrowOn @('u2')
+        try {
+            Invoke-Run $s | Out-Null
+            # The removal actually landed server-side even though the call threw.
+            $st = Read-State $s; $st.members = @(); $st.throwOn = @()
+            $st | ConvertTo-Json -Depth 10 | Set-Content $s.StateFile
+
+            Invoke-Run $s | Out-Null
+            $mf = Read-Manifest $s
+            $u2 = @($mf.transition.verifiedRemovals | Where-Object { $_.id -eq 'u2' })[0]
+            $u2.state     | Should -Be 'removed'
+            $u2.removedAt | Should -Not -BeNullOrEmpty
+        } finally { Remove-Item -Recurse -Force $s.Dir -ErrorAction SilentlyContinue }
     }
 }
 

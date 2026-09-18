@@ -463,62 +463,194 @@ function Test-VcioSignInsWithinFence {
     $result
 }
 
+function Get-VcioSignInClientCategory {
+    <#
+    .SYNOPSIS Map a sign-in's ClientAppUsed onto a CA clientAppTypes value.
+    .DESCRIPTION The sign-in log records a display string; conditions are
+    expressed in the enum. 'other' is the catch-all the CA enum uses for legacy
+    protocols that are not Exchange ActiveSync.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowNull()][AllowEmptyString()]$SignIn)
+    $used = $null
+    foreach ($probe in 'ClientAppUsed','clientAppUsed') {
+        if ($SignIn -and $SignIn.PSObject.Properties.Name -contains $probe) { $used = [string]$SignIn.$probe; break }
+    }
+    if ([string]::IsNullOrWhiteSpace($used)) { return 'unknown' }
+    switch -Regex ($used) {
+        '^\s*browser\s*$'                      { return 'browser' }
+        'mobile apps and desktop clients'       { return 'mobileAppsAndDesktopClients' }
+        'exchange activesync'                   { return 'exchangeActiveSync' }
+        default                                 { return 'other' }
+    }
+}
+
+function Get-VcioSignInPlatform {
+    <#.SYNOPSIS Map DeviceDetail.OperatingSystem onto a CA platform value.#>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowNull()]$SignIn)
+    $os = $null
+    if ($SignIn -and $SignIn.PSObject.Properties.Name -contains 'DeviceDetail' -and $SignIn.DeviceDetail) {
+        foreach ($probe in 'OperatingSystem','operatingSystem') {
+            if ($SignIn.DeviceDetail.PSObject.Properties.Name -contains $probe) { $os = [string]$SignIn.DeviceDetail.$probe; break }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($os)) { return 'unknown' }
+    switch -Regex ($os) {
+        'windows\s*phone'   { return 'windowsPhone' }
+        'windows'           { return 'windows' }
+        'ios|iphone|ipad'   { return 'iOS' }
+        'android'           { return 'android' }
+        'mac\s*os|macos'    { return 'macOS' }
+        'linux|ubuntu|rhel' { return 'linux' }
+        default             { return 'unknown' }
+    }
+}
+
 function Test-VcioStandardCoverage {
     <#
     .SYNOPSIS Is a removed user demonstrably back under the standard policies?
-    .DESCRIPTION Finding 6. Evidence is an ENFORCED result: 'success' or
-    'failure'. A reportOnly* result proves the policy evaluated but not that it
-    was enforcing, and notApplied proves nothing at all.
+    .DESCRIPTION Finding 6, second pass. The earlier rule — "each of the four
+    shows an enforced result on some sign-in" — cannot be right, because
+    notApplied is the CORRECT outcome for a compliant device on CA204, CA300
+    and CA301: those three carry the compliant-device exclude filter, so a
+    compliant device is deliberately filtered out of them. "Not notApplied"
+    can therefore never be the rule. The rule has to say when notApplied is
+    legitimate, and the sign-in log carries the fact that decides it —
+    DeviceDetail.IsCompliant.
 
-    Reading note: the four standard policies cannot all appear on ONE sign-in —
-    CA200 is mobileAppsAndDesktopClients while CA300/CA301 are browser, so they
-    are mutually exclusive on clientAppTypes. The check is therefore per policy:
-    each of the four must show an enforced result on SOME post-removal sign-in.
-    Sign-ins at or before RemovedAt are ignored — a sign-in from before the
-    removal says nothing about what happens after it.
+    So: per sign-in, per policy.
+
+      MARGIN      Only sign-ins at or after RemovedAt + PropagationMinutes are
+                  considered. Group membership changes are not instantaneous,
+                  and a sign-in in that window may have been evaluated against
+                  the old membership. Default 30 minutes.
+
+      MATCH       A policy matches a sign-in when the sign-in's client app
+                  category is in the policy's clientAppTypes AND its platform
+                  is in the policy's includePlatforms. CA200 and CA301 are
+                  Windows-only; CA204 and CA300 are any platform. Non-matching
+                  pairs are skipped — a browser sign-in says nothing about
+                  CA200, which only covers desktop clients.
+
+      PASS        success or failure — the policy was enforced and reached a
+                  verdict.
+                  notApplied ONLY when the policy carries the compliant-device
+                  exclude filter and DeviceDetail.IsCompliant is true. CA200
+                  has no filter, so notApplied on CA200 never passes: it means
+                  the policy did not reach the user at all.
+                  Anything else fails, including a policy that matched but is
+                  absent from the sign-in's applied list — absence is not
+                  evidence of coverage.
+
+      DEFECT      Any reportOnly* result fails the user AND is reported as a
+                  configuration defect. Phase 1 already required all four
+                  standard policies to be 'enabled'; a report-only result means
+                  one was changed underneath the exit, which is exactly the
+                  state this procedure must not finish in.
+
+    VERIFIED when at least one considered sign-in matched at least one policy
+    and every matching pair passed.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][AllowNull()]$SignIns,
-        [Parameter(Mandatory)][AllowEmptyCollection()][hashtable]$PolicyIdToName,
-        [Parameter(Mandatory)][datetime]$RemovedAt
+        [Parameter(Mandatory)][AllowEmptyCollection()]$Policies,
+        [Parameter(Mandatory)][datetime]$RemovedAt,
+        [ValidateRange(0,1440)][int]$PropagationMinutes = 30
     )
-    $enforced = @('success','failure')
-    $seen = @{}
+    $cutoff    = $RemovedAt.ToUniversalTime().AddMinutes($PropagationMinutes)
+    $failures  = New-Object System.Collections.Generic.List[string]
+    $defects   = New-Object System.Collections.Generic.List[string]
     $considered = 0
+    $ignored    = 0
+    $matched    = 0
+    $reportOnly = @('reportonlysuccess','reportonlyfailure','reportonlynotapplied','reportonlyinterrupted')
+
     foreach ($s in @(@($SignIns) | Where-Object { $_ })) {
         $created = $null
         foreach ($probe in 'CreatedDateTime','createdDateTime') {
             if ($s.PSObject.Properties.Name -contains $probe) { $created = $s.$probe; break }
         }
         if ($null -eq $created) { continue }
-        $when = if ($created -is [datetime]) { $created } else { [datetime]::Parse([string]$created, $null, [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal) }
-        # STRICTLY after the removal.
-        if ($when.ToUniversalTime() -le $RemovedAt.ToUniversalTime()) { continue }
+        $when = if ($created -is [datetime]) { $created } else {
+            [datetime]::Parse([string]$created, $null,
+                [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal) }
+        if ($when.ToUniversalTime() -lt $cutoff) { $ignored++; continue }
         $considered++
+
+        $category = Get-VcioSignInClientCategory -SignIn $s
+        $platform = Get-VcioSignInPlatform -SignIn $s
+        $isCompliant = $false
+        if ($s.PSObject.Properties.Name -contains 'DeviceDetail' -and $s.DeviceDetail) {
+            foreach ($probe in 'IsCompliant','isCompliant') {
+                if ($s.DeviceDetail.PSObject.Properties.Name -contains $probe) { $isCompliant = [bool]$s.DeviceDetail.$probe; break }
+            }
+        }
         $applied = $null
         foreach ($probe in 'AppliedConditionalAccessPolicies','appliedConditionalAccessPolicies') {
             if ($s.PSObject.Properties.Name -contains $probe) { $applied = $s.$probe; break }
         }
-        foreach ($p in @(@($applied) | Where-Object { $_ })) {
-            $pid_ = $null; $res = $null
-            foreach ($probe in 'Id','id') { if ($p.PSObject.Properties.Name -contains $probe) { $pid_ = [string]$p.$probe; break } }
-            foreach ($probe in 'Result','result') { if ($p.PSObject.Properties.Name -contains $probe) { $res = [string]$p.$probe; break } }
-            if ($pid_ -and $PolicyIdToName.ContainsKey($pid_) -and $res -and ($res.ToLowerInvariant() -in $enforced)) {
-                $seen[$pid_] = $true
+        $stamp = $when.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+
+        foreach ($pol in @($Policies)) {
+            $types = @(@($pol.ClientAppTypes) | Where-Object { $_ })
+            $plats = @(@($pol.IncludePlatforms) | Where-Object { $_ })
+            $clientMatch   = (-not $types.Count) -or ('all' -in $types) -or ($category -in $types)
+            $platformMatch = (-not $plats.Count) -or ('all' -in $plats) -or ($platform -in $plats)
+            if (-not ($clientMatch -and $platformMatch)) { continue }
+            $matched++
+
+            $entry = @(@($applied) | Where-Object { $_ -and (
+                ($_.PSObject.Properties.Name -contains 'Id' -and [string]$_.Id -eq [string]$pol.Id) -or
+                ($_.PSObject.Properties.Name -contains 'id' -and [string]$_.id -eq [string]$pol.Id)) }) | Select-Object -First 1
+            if (-not $entry) {
+                $failures.Add("$stamp $($pol.DisplayName) matched this sign-in ($category/$platform) but is absent from its applied-policies list — the policy did not evaluate for this user.")
+                continue
             }
+            $res = $null
+            foreach ($probe in 'Result','result') {
+                if ($entry.PSObject.Properties.Name -contains $probe) { $res = [string]$entry.$probe; break }
+            }
+            $r = if ($res) { $res.ToLowerInvariant() } else { '' }
+
+            if ($r -in @('success','failure')) { continue }
+            if ($r -in $reportOnly) {
+                $defects.Add("$($pol.DisplayName) returned '$res' at $stamp — it is not enforcing. Phase 1 required all four standard policies to be 'enabled'; one has changed underneath the exit.")
+                $failures.Add("$stamp $($pol.DisplayName) result '$res' is report-only, not enforced.")
+                continue
+            }
+            if ($r -eq 'notapplied') {
+                if ($pol.HasCompliantDeviceFilter -and $isCompliant) {
+                    # Correct and expected: the compliant-device exclude filter
+                    # took this device out of scope. That IS coverage working.
+                    continue
+                }
+                if ($pol.HasCompliantDeviceFilter) {
+                    $failures.Add("$stamp $($pol.DisplayName) returned notApplied on a device that is not compliant — the exclude filter does not explain it.")
+                } else {
+                    $failures.Add("$stamp $($pol.DisplayName) returned notApplied and carries no compliant-device filter — the policy did not reach this user.")
+                }
+                continue
+            }
+            $failures.Add("$stamp $($pol.DisplayName) returned an unrecognised result '$res'.")
         }
     }
-    $missing = @($PolicyIdToName.Keys | Where-Object { -not $seen.ContainsKey($_) } | ForEach-Object { $PolicyIdToName[$_] } | Sort-Object)
+
+    $verified = ($considered -gt 0 -and $matched -gt 0 -and $failures.Count -eq 0)
     [pscustomobject]@{
-        Verified            = (-not $missing.Count)
-        Missing             = $missing
-        SignInsConsidered   = $considered
-        PoliciesWithEnforcedResult = @($seen.Keys | ForEach-Object { $PolicyIdToName[$_] } | Sort-Object)
+        Verified             = $verified
+        Failures             = @($failures)
+        ConfigurationDefects = @($defects)
+        SignInsConsidered    = $considered
+        SignInsIgnoredInMargin = $ignored
+        MatchingPairs        = $matched
+        PropagationMinutes   = $PropagationMinutes
     }
 }
 
 Export-ModuleMember -Function ConvertTo-VcioCidr, Test-VcioIpInRange, Test-VcioIpInRanges, Test-VcioIsParsableIp,
     Get-VcioNamedLocationRanges, Get-VcioGraphCollection, Invoke-VcioAzGraphQuery,
     Assert-VcioTenantContext, Resolve-VcioObjectId, Test-VcioPermanentRoleAssignment,
-    Test-VcioPrincipalInPolicyScope, Test-VcioSignInsWithinFence, Test-VcioStandardCoverage
+    Test-VcioPrincipalInPolicyScope, Test-VcioSignInsWithinFence, Test-VcioStandardCoverage,
+    Get-VcioSignInClientCategory, Get-VcioSignInPlatform

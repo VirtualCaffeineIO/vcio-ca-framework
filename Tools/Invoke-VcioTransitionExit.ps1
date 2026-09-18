@@ -32,6 +32,12 @@
 
     Idempotent across runs. -WhatIf supported.
 
+    SCHEDULING: this cmdlet is ConfirmImpact='High', so every removal prompts
+    when run interactively. A scheduled run MUST pass -Confirm:$false or it
+    will block on the first prompt and the exit will never progress — a daily
+    job that silently waits forever looks exactly like a daily job that has
+    nothing to do.
+
     Runbook: schedule daily (Azure Automation or the MSP's job host). Where
     Entra ID Governance is licensed, a recurring access review with auto-remove
     on the group is the supported alternative to scheduling this.
@@ -50,7 +56,11 @@
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
 param(
     [Parameter(Mandatory)][string]$Manifest,
-    [string]$LogPath
+    [string]$LogPath,
+    # Group membership changes are not instantaneous. A sign-in inside this
+    # window after the removal may still have been evaluated against the old
+    # membership, so it is not evidence either way and is ignored.
+    [ValidateRange(0,1440)][int]$PropagationMinutes = 30
 )
 
 $ErrorActionPreference = 'Stop'
@@ -137,6 +147,59 @@ if (-not $exitDate) { throw 'Manifest has no transition.exitDate. The exit date 
 Write-Log ("Transition exit run. Group '{0}' has {1} member(s). exitDate {2}." -f `
     $TRANSITION_GROUP, $members.Count, $exitDate.ToString('yyyy-MM-dd'))
 
+# ---------------------------------------------------------------- state machine
+# Finding 6B. Each recorded user carries state pending|removed|verified.
+#
+#   pending   attemptedAt written BEFORE the API call. If the call throws, the
+#             entry stays pending and the next run RETRIES it. The previous
+#             version wrote the id before the call and skipped any recorded id
+#             on the next run, so a throw under $ErrorActionPreference='Stop'
+#             left the user in the group, recorded as done, forever.
+#   removed   removedAt written AFTER the call returns. Stamping it before the
+#             call made the window between stamp and actual removal count as
+#             post-removal evidence.
+#   verified  a post-removal sign-in satisfied Test-VcioStandardCoverage.
+function Save-Manifest([string]$What) {
+    if ($PSCmdlet.ShouldProcess($Manifest, $What)) {
+        $mf | ConvertTo-Json -Depth 12 | Set-Content -Path $Manifest -Encoding utf8
+    }
+}
+# Emits the entries; every CALLER wraps in @(). The comma-return trick would
+# make an empty result a one-element array containing an empty array.
+function Get-Entries { @($mf.transition.verifiedRemovals) | Where-Object { $_ } }
+function Set-Entries($Entries) { $mf.transition.verifiedRemovals = @($Entries) }
+function Get-EntryState($Entry) {
+    if ($Entry.PSObject.Properties.Name -contains 'state' -and $Entry.state) { return [string]$Entry.state }
+    # Migrate an entry written by an earlier version.
+    if ($Entry.PSObject.Properties.Name -contains 'verified' -and $Entry.verified) { return 'verified' }
+    'removed'
+}
+function Set-EntryProperty($Entry, [string]$Name, $Value) {
+    if ($Entry.PSObject.Properties.Name -contains $Name) { $Entry.$Name = $Value }
+    else { $Entry | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force }
+}
+
+# Reconcile before doing anything else, against the membership just read.
+$memberIds = @($members | ForEach-Object { $_.Id })
+$entries = @(Get-Entries)
+$reconciled = 0
+foreach ($e in $entries) {
+    if ((Get-EntryState $e) -ne 'pending') { continue }
+    if ($e.id -in $memberIds) {
+        Write-Log "  PENDING $($e.upn) is still a member — the previous removal did not take. Will retry."
+        continue
+    }
+    # No longer a member, but we never recorded a completion. The removal did
+    # happen; we just did not see it return. Stamp conservatively LATE — a
+    # removedAt that is later than the truth only delays verification, while
+    # one that is early would admit a pre-removal sign-in as evidence.
+    Set-EntryProperty $e 'removedAt' ([datetime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ'))
+    Set-EntryProperty $e 'state' 'removed'
+    $reconciled++
+    Write-Log "  RECONCILED $($e.upn) — no longer a member; recorded as removed at $($e.removedAt) (conservatively late)."
+}
+if ($reconciled) { Set-Entries $entries; Save-Manifest "reconcile $reconciled pending removal(s)" }
+
 # ---------------------------------------------------------------- phase 1+2
 if ($members.Count -gt 0) {
     if ((Get-Date) -lt $exitDate) {
@@ -176,33 +239,56 @@ if ($members.Count -gt 0) {
     Write-Log "Fallback verified for all $($members.Count) member(s). Exporting roster, then removing."
     foreach ($r in $roster) { Write-Log "  REMOVING $($r.Upn) ($($r.Id))" }
 
-    # Finding 6 — removedAt is a precise UTC instant per user, and it is
-    # persisted BEFORE the removal it describes. A date-only, local-time stamp
-    # written once after the loop had two failure modes: a run that died
-    # halfway left members removed with nothing recording it, so the next run
-    # could not know whom to verify; and a same-day sign-in from BEFORE the
-    # removal satisfied "createdDateTime ge <date>" and counted as evidence of
-    # post-removal coverage.
-    $existing = @($mf.transition.verifiedRemovals)
-    $known = @($existing | ForEach-Object { $_.id })
+    $entries = @(Get-Entries)
+    $failed = 0
     foreach ($r in $roster) {
-        if ($r.Id -in $known) { continue }
-        $removedAt = [datetime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
-        $existing += [pscustomobject]@{ upn = $r.Upn; id = $r.Id; removedAt = $removedAt; verified = $false }
-        $mf.transition.verifiedRemovals = @($existing)
-        if ($PSCmdlet.ShouldProcess($Manifest, "record removal of $($r.Upn) at $removedAt")) {
-            # Durable before the next removal, so a partial run resumes.
-            $mf | ConvertTo-Json -Depth 12 | Set-Content -Path $Manifest -Encoding utf8
+        $e = @($entries | Where-Object { $_.id -eq $r.Id }) | Select-Object -First 1
+        # A 'removed' or 'verified' entry whose user is somehow a member again
+        # is a re-add, not a completed removal; treat it as pending and retry.
+        if ($e -and (Get-EntryState $e) -ne 'pending') {
+            Write-Log "  RE-ADDED $($r.Upn) is a member again despite a recorded removal — removing again."
         }
+        if (-not $e) {
+            $e = [pscustomobject]@{ upn = $r.Upn; id = $r.Id; state = 'pending'; attemptedAt = $null; removedAt = $null }
+            $entries = @($entries) + @($e)
+        }
+        Set-EntryProperty $e 'upn'         $r.Upn
+        Set-EntryProperty $e 'state'       'pending'
+        Set-EntryProperty $e 'attemptedAt' ([datetime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ'))
+        Set-EntryProperty $e 'removedAt'   $null
+        Set-Entries $entries
+        # Durable BEFORE the call, so a crash leaves a pending entry to retry.
+        Save-Manifest "mark $($r.Upn) pending at $($e.attemptedAt)"
+
         if ($PSCmdlet.ShouldProcess($r.Upn, "remove from $TRANSITION_GROUP")) {
-            Remove-MgGroupMemberByRef -GroupId $group.Id -DirectoryObjectId $r.Id
+            try {
+                Remove-MgGroupMemberByRef -GroupId $group.Id -DirectoryObjectId $r.Id -ErrorAction Stop
+            } catch {
+                # Stays pending. The next run re-reads membership and retries.
+                $failed++
+                Write-Log "  FAILED to remove $($r.Upn): $($_.Exception.Message). Left PENDING for the next run."
+                continue
+            }
         }
+        # Only now, after the call returned.
+        Set-EntryProperty $e 'removedAt' ([datetime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ'))
+        Set-EntryProperty $e 'state'     'removed'
+        Set-Entries $entries
+        Save-Manifest "mark $($r.Upn) removed at $($e.removedAt)"
     }
-    $mf.transition.groupEmptiedDate = [datetime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
-    if ($PSCmdlet.ShouldProcess($Manifest, 'record group-emptied timestamp')) {
-        $mf | ConvertTo-Json -Depth 12 | Set-Content -Path $Manifest -Encoding utf8
+
+    # groupEmptiedDate is written ONLY from a fresh membership read, never from
+    # the roster we just walked. The roster says what we tried; only Graph says
+    # what is actually in the group.
+    $after = @(Get-MgGroupMember -GroupId $group.Id -All)
+    if ($after.Count -eq 0) {
+        $mf.transition.groupEmptiedDate = [datetime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+        Save-Manifest 'record group-emptied timestamp'
+        Write-Log 'Group confirmed empty by a fresh membership read. Transition policies stay ENABLED until every removed user is verified on the standard path.'
+    } else {
+        Write-Log "Group still has $($after.Count) member(s) after this run ($failed removal failure(s)). groupEmptiedDate NOT written. Re-run to retry the pending entries."
+        exit 1
     }
-    Write-Log 'Members removed. Transition policies stay ENABLED until every removed user is verified on the standard path.'
     exit 0
 }
 
@@ -214,19 +300,38 @@ if (-not $removals.Count) {
     exit 0
 }
 
-$standardIds = @{}
+# Build the matching facts from the LIVE policies: clientAppTypes,
+# includePlatforms, and whether the policy carries the compliant-device
+# exclude filter. CA200 has no filter; CA204, CA300 and CA301 do, which is
+# exactly why notApplied means different things on them.
+$standardPolicies = @()
 foreach ($n in $STANDARD_POLICIES) {
     $p = Resolve-Policy $n
-    if ($p) { $standardIds[$p.Id] = $n }
+    if (-not $p) { continue }
+    $filterRule = $null
+    if ($p.Conditions.Devices -and $p.Conditions.Devices.DeviceFilter) { $filterRule = [string]$p.Conditions.Devices.DeviceFilter.Rule }
+    $standardPolicies += [pscustomobject]@{
+        Id                       = $p.Id
+        DisplayName              = $p.DisplayName
+        ClientAppTypes           = @($p.Conditions.ClientAppTypes)
+        IncludePlatforms         = @(if ($p.Conditions.Platforms) { $p.Conditions.Platforms.IncludePlatforms } else { @() })
+        HasCompliantDeviceFilter = [bool]($filterRule -and $filterRule -match 'device\.isCompliant')
+    }
 }
-if ($standardIds.Count -ne $STANDARD_POLICIES.Count) {
-    Write-Log "STOPPED. Only $($standardIds.Count) of $($STANDARD_POLICIES.Count) standard policies resolved; cannot verify coverage against policies that are not there."
+if ($standardPolicies.Count -ne $STANDARD_POLICIES.Count) {
+    Write-Log "STOPPED. Only $($standardPolicies.Count) of $($STANDARD_POLICIES.Count) standard policies resolved; cannot verify coverage against policies that are not there."
     exit 1
 }
 
 $unverified = New-Object System.Collections.Generic.List[string]
+$configDefects = New-Object System.Collections.Generic.List[string]
 foreach ($r in $removals) {
-    if ($r.verified) { continue }
+    $state = Get-EntryState $r
+    if ($state -eq 'verified') { continue }
+    if ($state -eq 'pending') {
+        $unverified.Add("$($r.upn) — still PENDING removal; nothing to verify until the removal succeeds.")
+        continue
+    }
     # Tolerate a manifest written by an older version (removedDate, date-only).
     $stampText = if ($r.PSObject.Properties.Name -contains 'removedAt' -and $r.removedAt) { $r.removedAt }
                  elseif ($r.PSObject.Properties.Name -contains 'removedDate' -and $r.removedDate) { $r.removedDate }
@@ -258,17 +363,28 @@ foreach ($r in $removals) {
     # single sign-in would never be satisfiable and the exit would never
     # complete. Each of the four must show an enforced result on SOME
     # post-removal sign-in.
-    $cov = Test-VcioStandardCoverage -SignIns $signIns -PolicyIdToName $standardIds -RemovedAt $removedAt
+    $cov = Test-VcioStandardCoverage -SignIns $signIns -Policies $standardPolicies `
+        -RemovedAt $removedAt -PropagationMinutes $PropagationMinutes
+    foreach ($d in $cov.ConfigurationDefects) { $configDefects.Add("$($r.upn): $d") }
     if ($cov.Verified) {
-        $r.verified = $true
-        Write-Log "  VERIFIED $($r.upn) — all four standard policies show an enforced result across $($cov.SignInsConsidered) post-removal sign-in(s)."
+        Set-EntryProperty $r 'state' 'verified'
+        Set-EntryProperty $r 'verified' $true
+        Write-Log ("  VERIFIED $($r.upn) — $($cov.MatchingPairs) matching policy/sign-in pair(s) across " +
+                   "$($cov.SignInsConsidered) sign-in(s) after the $($cov.PropagationMinutes)-minute margin, all passed.")
     } else {
-        $unverified.Add("$($r.upn) — removed $stampText; $($cov.SignInsConsidered) post-removal sign-in(s), but no enforced result yet for: $($cov.Missing -join ', ')")
+        $detail = if ($cov.Failures.Count) { $cov.Failures -join ' | ' }
+                  elseif ($cov.SignInsConsidered -eq 0) { "no sign-ins yet after the $($cov.PropagationMinutes)-minute propagation margin ($($cov.SignInsIgnoredInMargin) ignored inside it)" }
+                  else { 'no standard policy matched any considered sign-in yet' }
+        $unverified.Add("$($r.upn) — removed $stampText; $detail")
     }
 }
 
-if ($PSCmdlet.ShouldProcess($Manifest, 'record verification results')) {
-    $mf | ConvertTo-Json -Depth 12 | Set-Content -Path $Manifest -Encoding utf8
+Save-Manifest 'record verification results'
+
+if ($configDefects.Count) {
+    Write-Log "CONFIGURATION DEFECT — a standard policy is no longer enforcing:"
+    $configDefects | ForEach-Object { Write-Log "  - $_" }
+    Write-Log 'Phase 1 required all four to be enabled. Fix that before continuing the exit.'
 }
 
 if ($unverified.Count) {
