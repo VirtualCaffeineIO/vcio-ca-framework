@@ -2,6 +2,8 @@
 
 The framework keeps MFA on Intune enrollment (CA203) and on security-info registration (CA004), because both are privileged acts: a compliant device is a credential that satisfies CA200/CA201 forever after, and a registered MFA method is the key to everything. What makes these policies livable is the method below — not exclusion groups.
 
+**CA004 now gates more than it used to.** Since 2026-07-06, Windows Hello for Business enrollment and macOS Platform SSO registration count as security-info registration, so CA004 applies to both. That is the right outcome — provisioning a phishing-resistant credential is at least as privileged as adding a phone number — but it means CA004 sits directly in the path of every new device's first passwordless setup. **A TAP satisfies it**, which is why the TAP-in-OOBE flow below is the supported path and not merely the convenient one. Without a TAP, the user has to complete classic MFA before WHfB will enroll, and a new hire with no registered method cannot.
+
 ## The recommendation hierarchy
 
 **1. User-driven Autopilot + Temporary Access Pass — the default for new hires.**
@@ -25,5 +27,7 @@ Frontline and phoneless workers: hardware OATH tokens or FIDO2 keys instead of A
 ## Known interactions
 
 * **Windows first sign-in animation / restore**: if CA200 blocks Microsoft Activity Feed Service during OOBE, add the documented exclusion (app `d32c68ad-72d2-4acb-a0c7-46bb2cf93873`) to CA200 — a known first-party quirk.
-* **WHfB enrollment requires MFA**: satisfied by the TAP during OOBE. If a user skips WHfB setup, their next opportunity prompts classic MFA — which they registered under the TAP session.
+* **WHfB enrollment requires MFA, and CA004 is what requires it**: satisfied by the TAP during OOBE. If a user skips WHfB setup, their next opportunity prompts classic MFA — which they registered under the TAP session.
+* **macOS Platform SSO registration** is gated by CA004 on the same basis. A Mac user being onboarded needs the same TAP treatment as a Windows user; the registration is the same privileged act on a different platform.
+* **Pilot CA003 and CA004 rather than soaking them.** Report-only produces no data for user-action policies, so the usual two-week observation gives you an empty workbook and false confidence. Pilot on a test group of at least five users, including one real new-hire Autopilot run with a TAP, and treat that as the gate evidence.
 * **Autopilot + CA003 (register/join MFA)**: user-driven Autopilot presents the user's credentials during OOBE; the TAP covers this too. Disable the legacy tenant-wide "require MFA to register devices" toggle so CA003 is the single control.

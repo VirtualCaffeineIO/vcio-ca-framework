@@ -1,0 +1,103 @@
+{
+  "_comment": [
+    "VCIO CA Framework deployment manifest — one per tenant.",
+    "",
+    "This file is the only place several facts about a deployment exist. The",
+    "policy JSON cannot hold them: Graph documents conditionalAccessPolicy",
+    "'description' as 'Not used' and nothing proves a value there survives an",
+    "IntuneManagement import/export round trip, so the transition exit date,",
+    "the fencing mode and the per-account CA501 deadlines live here instead.",
+    "",
+    "Copy this to Deploy/<customer>/manifest.json and fill it in at import",
+    "time, while the tenant object IDs are in front of you. Deploy/*/ is",
+    "gitignored — a real manifest names a real tenant and never ships in the",
+    "public repo.",
+    "",
+    "Every tool in Tools/ takes -Manifest <path>:",
+    "  Tools/Test-VcioCaBaseline.ps1        C2 and C6 drift rules",
+    "  Tools/Compare-VcioPrivilegedScope.ps1  expected Azure scope inventory (E1)",
+    "  Tools/Invoke-VcioTransitionExit.ps1  the transition exit (E2)",
+    "and Prereqs/Invoke-VcioCaPrereqs.ps1 reads fencingMode for gate B3a."
+  ],
+
+  "_tenantId": "Load-bearing, not documentation. Every tool connects with Connect-MgGraph -TenantId from this field and then asserts the live Graph context matches it, stopping before any read or write if it does not. A tool pointed at the wrong tenant by a stale cached context is the failure this makes impossible.",
+  "tenantId": "00000000-0000-0000-0000-000000000000",
+  "tenantDomain": "contoso.onmicrosoft.com",
+  "frameworkVersion": "2026.9.1",
+  "importedDate": "2026-09-11",
+
+  "_fencingMode": "Shared (one or two service accounts on the shared CA500/CA501) or Per-System (one CA500/CA501 pair per system). One mode per tenant. In Per-System the shared CA500 and CA501 must be 'disabled', not report-only — report-only still evaluates and would impose the shared location on a per-system account.",
+  "fencingMode": "Shared",
+
+  "_objectIds": "Tenant object IDs as created at import. The shipped GUIDs are uuid5 build IDs; IntuneManagement remaps them through MigrationTable.json and these are what it created. Record them so drift checks and the exit script address the right objects.",
+  "objectIds": {
+    "groups": {
+      "SG-CA-BreakGlass": "00000000-0000-0000-0000-000000000000",
+      "SG-CA-Users": "00000000-0000-0000-0000-000000000000",
+      "SG-CA-ServiceAccounts": "00000000-0000-0000-0000-000000000000",
+      "SG-CA-Privileged": "00000000-0000-0000-0000-000000000000",
+      "SG-CA-Transition-Hybrid": "00000000-0000-0000-0000-000000000000",
+      "SG-CA-Excl-CA002": "00000000-0000-0000-0000-000000000000",
+      "SG-CA-Excl-CA007": "00000000-0000-0000-0000-000000000000"
+    },
+    "namedLocations": {
+      "VCIO-NL-AllowedCountries": "00000000-0000-0000-0000-000000000000",
+      "VCIO-NL-ServiceAccountIPs": "00000000-0000-0000-0000-000000000000",
+      "VCIO-NL-TrustedEgress": "00000000-0000-0000-0000-000000000000"
+    },
+    "policies": {
+      "CA000-VCIO-Global-BlockLegacyAuth": "00000000-0000-0000-0000-000000000000",
+      "CA001-VCIO-Global-BlockDeviceCodeFlow": "00000000-0000-0000-0000-000000000000",
+      "CA002-VCIO-Global-MFA": "00000000-0000-0000-0000-000000000000",
+      "CA007-VCIO-Global-BlockAuthTransfer": "00000000-0000-0000-0000-000000000000",
+      "CA500-VCIO-ServiceAccounts-IPFence": "00000000-0000-0000-0000-000000000000"
+    }
+  },
+
+  "_transition": "A10/E2. exitDate is the operator deadline for emptying SG-CA-Transition-Hybrid. The exit order is fixed and Tools/Invoke-VcioTransitionExit.ps1 enforces it: verify every member is in SG-CA-Users and that CA200/CA204/CA300/CA301 are 'enabled', remove members, confirm a post-removal sign-in per user shows the standard policies applied, and only then disable the transition policies. Disabling them before the group is empty removes protection outright.",
+  "transition": {
+    "exitDate": "2027-03-31",
+    "groupId": "00000000-0000-0000-0000-000000000000",
+    "_verifiedRemovals": "Written by Tools/Invoke-VcioTransitionExit.ps1, one entry per removed user: { upn, id, removedAt, verified }. removedAt is a precise UTC instant (yyyy-MM-ddTHH:mm:ss.fffZ) persisted BEFORE the removal it describes, so a run that dies halfway resumes correctly and a sign-in from before the removal can never be mistaken for evidence of post-removal coverage.",
+    "groupEmptiedDate": null,
+    "policyIds": {
+      "CA200-VCIO-Users-Windows-CompliantOrHybrid-TRANSITION": "00000000-0000-0000-0000-000000000000",
+      "CA204-VCIO-Users-SessionHygiene-Unmanaged-TRANSITION": "00000000-0000-0000-0000-000000000000",
+      "CA300-VCIO-BYOD-BrowserSessionControls-TRANSITION": "00000000-0000-0000-0000-000000000000",
+      "CA301-VCIO-BYOD-Windows-RequireAppProtection-TRANSITION": "00000000-0000-0000-0000-000000000000"
+    },
+    "verifiedRemovals": []
+  },
+
+  "_serviceAccounts": "Worksheet item 6a. One entry per member of SG-CA-ServiceAccounts. 'ca501Owner' and 'ca501Deadline' are the named owner and date for completing the app allow-list; where the decision was to run IP-fenced without one, say so in 'ca501Decision'. Sync accounts are NEVER listed here — CA002 exempts the Directory Synchronization Accounts role (A4) and optional fencing for them is the dedicated CA500-VCIO-ServiceAccounts-IPFence-DirSync instance on SG-CA-SA-DirSync.",
+  "serviceAccounts": [
+    {
+      "upn": "svc-backup@contoso.com",
+      "system": "BACKUP",
+      "saGroup": "SG-CA-SA-BACKUP",
+      "governingFencePolicy": "CA500-VCIO-ServiceAccounts-IPFence",
+      "governingLocation": "VCIO-NL-ServiceAccountIPs",
+      "ca501Owner": "",
+      "ca501Deadline": "",
+      "ca501Decision": ""
+    }
+  ],
+
+  "_groupMemberCounts": "Optional. Membership is a live fact; an IntuneManagement export usually does not carry it. Where the drift validator cannot read membership it reports UNVERIFIED and does not pass. Record counts here (as of the export) to let it complete offline.",
+  "groupMemberCounts": {
+    "SG-CA-Transition-Hybrid": 0
+  },
+
+  "_expectedAzureScope": "E1. Tools/Compare-VcioPrivilegedScope.ps1 diffs the tenant's real privileged holders against SG-CA-Privileged plus the built-in admin roles. Anything in this inventory the caller cannot read, or anything in the tenant that is not in this inventory, is reported INCOMPLETE — the run is not clean and the Ring 3 gate will not pass on it.",
+  "expectedAzureScope": {
+    "managementGroups": ["contoso-root"],
+    "subscriptions": [
+      { "id": "00000000-0000-0000-0000-000000000000", "name": "Production" }
+    ]
+  },
+
+  "_partnerTenants": "D5. GDAP partner tenants. Their MFA is home-tenant enforced and always trusted; compliant-device trust is the separate inbound cross-tenant setting (worksheet item 14a). CA403 excludes serviceProvider; CA400, CA402 and CA103 still apply.",
+  "partnerTenants": [
+    { "tenantId": "00000000-0000-0000-0000-000000000000", "name": "VirtualCaffeine.io", "compliantDeviceTrustInbound": false }
+  ]
+}

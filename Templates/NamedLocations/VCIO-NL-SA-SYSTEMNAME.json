@@ -1,0 +1,16 @@
+{
+  "@odata.type": "#microsoft.graph.ipNamedLocation",
+  "id": "bbb071e9-fa0e-5b81-a6d6-88b9324318a4",
+  "displayName": "VCIO-NL-SA-SYSTEMNAME",
+  "createdDateTime": "2026-07-09T00:00:00.0000000Z",
+  "modifiedDateTime": "2026-07-09T00:00:00.0000000Z",
+  "deletedDateTime": null,
+  "isTrusted": false,
+  "ipRanges@odata.type": "#Collection(microsoft.graph.ipRange)",
+  "ipRanges": [
+    {
+      "@odata.type": "#microsoft.graph.iPv4CidrRange",
+      "cidrAddress": "203.0.113.0/24"
+    }
+  ]
+}

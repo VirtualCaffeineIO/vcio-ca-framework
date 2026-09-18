@@ -58,7 +58,7 @@
       "excludeRoles@odata.type": "#Collection(String)",
       "excludeRoles": [],
       "includeGuestsOrExternalUsers": {
-        "guestOrExternalUserTypes": "internalGuest,b2bCollaborationGuest,b2bCollaborationMember,b2bDirectConnectUser,otherExternalUser,serviceProvider",
+        "guestOrExternalUserTypes": "internalGuest,b2bCollaborationGuest,b2bCollaborationMember,b2bDirectConnectUser,otherExternalUser",
         "externalTenants": {
           "@odata.type": "#microsoft.graph.conditionalAccessAllExternalTenants",
           "membershipKind": "all"
