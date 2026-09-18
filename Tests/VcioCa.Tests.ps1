@@ -393,6 +393,252 @@ Describe 'Finding 6A — per-sign-in, per-policy coverage' {
 }
 
 # ==========================================================================
+Describe 'Finding 6A — the notApplied acceptance has preconditions' {
+
+    Context 'precondition 1 — the filter must be EXACTLY the framework filter' {
+        It 'exclude mode with the exact rule counts' {
+            Test-VcioCompliantDeviceExcludeFilter -DeviceFilter ([pscustomobject]@{
+                Mode='exclude'; Rule='device.isCompliant -eq True' }) | Should -BeTrue
+        }
+        It 'whitespace is normalised' {
+            Test-VcioCompliantDeviceExcludeFilter -DeviceFilter ([pscustomobject]@{
+                Mode='exclude'; Rule="  device.isCompliant   -eq    True " }) | Should -BeTrue
+        }
+        It 'INCLUDE mode does not count' {
+            Test-VcioCompliantDeviceExcludeFilter -DeviceFilter ([pscustomobject]@{
+                Mode='include'; Rule='device.isCompliant -eq True' }) | Should -BeFalse
+        }
+        It '-eq False does not count' {
+            Test-VcioCompliantDeviceExcludeFilter -DeviceFilter ([pscustomobject]@{
+                Mode='exclude'; Rule='device.isCompliant -eq False' }) | Should -BeFalse
+        }
+        It '-ne does not count' {
+            Test-VcioCompliantDeviceExcludeFilter -DeviceFilter ([pscustomobject]@{
+                Mode='exclude'; Rule='device.isCompliant -ne True' }) | Should -BeFalse
+        }
+        It 'an extra clause does not count' {
+            Test-VcioCompliantDeviceExcludeFilter -DeviceFilter ([pscustomobject]@{
+                Mode='exclude'; Rule='device.isCompliant -eq True -or device.trustType -eq "ServerAd"' }) | Should -BeFalse
+        }
+        It 'an absent filter does not count' {
+            Test-VcioCompliantDeviceExcludeFilter -DeviceFilter $null | Should -BeFalse
+        }
+        It 'a policy whose filter fails the test cannot pass on notApplied' {
+            # The unit-level consequence: HasCompliantDeviceFilter false means
+            # notApplied is a failure even for a compliant device.
+            $pols = @([pscustomobject]@{ Id='p300'; DisplayName='CA300'; ClientAppTypes=@('browser')
+                                         IncludePlatforms=@(); HasCompliantDeviceFilter=$false })
+            $removed = [datetime]::Parse('2026-09-10T12:00:00Z').ToUniversalTime()
+            $s = [pscustomobject]@{
+                CreatedDateTime = $removed.AddMinutes(45); ClientAppUsed='Browser'
+                DeviceDetail = [pscustomobject]@{ OperatingSystem='Windows 10'; IsCompliant=$true }
+                AppliedConditionalAccessPolicies = @([pscustomobject]@{ Id='p300'; Result='notApplied' }) }
+            $r = Test-VcioStandardCoverage -SignIns @($s) -Policies $pols -RemovedAt $removed
+            $r.Verified | Should -BeFalse
+            ($r.Failures -join ' ') | Should -Match 'carries no compliant-device filter'
+        }
+    }
+
+    Context 'the empty-object trap this surfaced' {
+        It 'Test-VcioHasProperty survives an object with zero properties' {
+            # $o.PSObject.Properties.Name -contains 'x' throws under
+            # Set-StrictMode -Version Latest when $o has NO properties, which
+            # is what a manifest section written as {} deserialises to. The
+            # 6A positive case hit it in the disable step.
+            Test-VcioHasProperty ([pscustomobject]@{}) 'x' | Should -BeFalse
+            Test-VcioHasProperty ([pscustomobject]@{ a = 1 }) 'a' | Should -BeTrue
+            Test-VcioHasProperty $null 'a' | Should -BeFalse
+            Test-VcioHasProperty @{ a = 1 } 'a' | Should -BeTrue
+        }
+        It 'a manifest whose objectIds sections are all empty resolves without throwing' {
+            $mf = @{ objectIds = @{ groups = @{}; policies = @{}; namedLocations = @{} }
+                     transition = @{ policyIds = @{} } } | ConvertTo-Json -Depth 5 | ConvertFrom-Json
+            { Resolve-VcioObjectId -Manifest $mf -Kind 'policies' -Name 'CA200-X' -Fallback { $null } } | Should -Not -Throw
+            (Resolve-VcioObjectId -Manifest $mf -Kind 'policies' -Name 'CA200-X' -Fallback { $null }).Source | Should -Be 'unresolved'
+        }
+        It 'no shipped script still uses the fragile member-enumeration form' {
+            $offenders = @()
+            foreach ($f in @('Tools/VcioCaCommon.psm1','Tools/Invoke-VcioTransitionExit.ps1','Tools/Compare-VcioPrivilegedScope.ps1')) {
+                $txt = Get-Content -Raw (Join-Path $script:Root $f)
+                if ($txt -match '\.PSObject\.Properties\.Name\s+-contains') { $offenders += $f }
+            }
+            $offenders -join ', ' | Should -BeExactly ''
+        }
+    }
+
+    Context 'precondition 3 — effective scope of the removed user' {
+        BeforeAll {
+            $script:ScopePols = @(
+                [pscustomobject]@{ DisplayName='CA200'; ExcludeGroups=@('g-bg','g-excl-200','g-transition'); ExcludeUsers=@() }
+                [pscustomobject]@{ DisplayName='CA204'; ExcludeGroups=@('g-bg','g-excl-204','g-transition'); ExcludeUsers=@() }
+                [pscustomobject]@{ DisplayName='CA300'; ExcludeGroups=@('g-bg','g-excl-300','g-transition'); ExcludeUsers=@() }
+                [pscustomobject]@{ DisplayName='CA301'; ExcludeGroups=@('g-bg','g-excl-301','g-transition'); ExcludeUsers=@() }
+            )
+        }
+        It 'a user in SG-CA-Users and no exclusion is in scope' {
+            (Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users') `
+                -UsersGroupId 'g-users' -Policies $script:ScopePols).InScope | Should -BeTrue
+        }
+        It 'a user NOT in SG-CA-Users is out of scope' {
+            $r = Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-other') `
+                -UsersGroupId 'g-users' -Policies $script:ScopePols
+            $r.InScope | Should -BeFalse
+            $r.Reason  | Should -Match 'SG-CA-Users'
+        }
+        It 'a user in an exclusion group via NESTING is out of scope' {
+            $r = Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users','g-nested','g-excl-300') `
+                -UsersGroupId 'g-users' -Policies $script:ScopePols
+            $r.InScope | Should -BeFalse
+            $r.Reason  | Should -Match 'CA300'
+        }
+        It 'a user named in excludeUsers is out of scope' {
+            $pols = @([pscustomobject]@{ DisplayName='CA204'; ExcludeGroups=@(); ExcludeUsers=@('u1') })
+            $r = Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users') `
+                -UsersGroupId 'g-users' -Policies $pols
+            $r.InScope | Should -BeFalse
+            $r.Reason  | Should -Match 'excludeUsers'
+        }
+        It 'still in SG-CA-Transition-Hybrid is out of scope' {
+            (Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users','g-transition') `
+                -UsersGroupId 'g-users' -Policies $script:ScopePols).InScope | Should -BeFalse
+        }
+    }
+
+    Context 'end to end — a compliant device with notApplied results' {
+        BeforeAll {
+            $script:Harness = Join-Path $PSScriptRoot 'Fixtures/TransitionExitHarness.ps1'
+            $script:Target  = Join-Path $script:Root 'Tools/Invoke-VcioTransitionExit.ps1'
+
+            # Every scenario below: the user was removed, their device is
+            # COMPLIANT, and CA204/CA300/CA301 return notApplied. Nothing may
+            # pass on those facts alone — each case breaks one precondition.
+            function New-VerifyScenario {
+                param(
+                    [hashtable]$PolicyOverrides = @{},
+                    [string[]]$UserGroups = @('g-users'),
+                    [hashtable]$PolicyExcludeUsers = @{}
+                )
+                $dir = Join-Path ([System.IO.Path]::GetTempPath()) ("vcio-6a-" + [guid]::NewGuid())
+                New-Item -ItemType Directory -Path $dir | Out-Null
+                $removedAt = [datetime]::UtcNow.AddHours(-3)
+
+                $defs = @(
+                    @{ id='p200'; displayName='CA200-VCIO-Users-Windows-CompliantDevice';     state='enabled'; clientAppTypes=@('mobileAppsAndDesktopClients'); includePlatforms=@('windows'); filterRule=$null; filterMode=$null }
+                    @{ id='p204'; displayName='CA204-VCIO-Users-SessionHygiene-Unmanaged';    state='enabled'; clientAppTypes=@('all');     includePlatforms=@();          filterRule='device.isCompliant -eq True'; filterMode='exclude' }
+                    @{ id='p300'; displayName='CA300-VCIO-BYOD-BrowserSessionControls';       state='enabled'; clientAppTypes=@('browser'); includePlatforms=@();          filterRule='device.isCompliant -eq True'; filterMode='exclude' }
+                    @{ id='p301'; displayName='CA301-VCIO-BYOD-Windows-RequireAppProtection'; state='enabled'; clientAppTypes=@('browser'); includePlatforms=@('windows'); filterRule='device.isCompliant -eq True'; filterMode='exclude' }
+                )
+                foreach ($d in $defs) {
+                    $d['excludeGroups'] = @('g-bg', "g-excl-$($d.id)", 'g-transition')
+                    $d['excludeUsers']  = @()
+                    if ($PolicyOverrides.ContainsKey($d.id)) {
+                        foreach ($k in $PolicyOverrides[$d.id].Keys) { $d[$k] = $PolicyOverrides[$d.id][$k] }
+                    }
+                    if ($PolicyExcludeUsers.ContainsKey($d.id)) { $d['excludeUsers'] = $PolicyExcludeUsers[$d.id] }
+                }
+
+                $state = @{
+                    tenantId='tenant-abc'; usersGroupId='g-users'; members=@(); usersGroupMembers=@('u1')
+                    throwOn=@(); removeLog=@(); disabled=@(); policies=$defs
+                    userGroups = @{ u1 = $UserGroups }
+                    signIns = @(
+                        @{ createdDateTime = $removedAt.AddMinutes(60).ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+                           clientAppUsed='Mobile Apps and Desktop clients'; operatingSystem='Windows 10'; isCompliant=$true
+                           applied=@(@{id='p200';result='success'}, @{id='p204';result='notApplied'}) }
+                        @{ createdDateTime = $removedAt.AddMinutes(65).ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+                           clientAppUsed='Browser'; operatingSystem='Windows 10'; isCompliant=$true
+                           applied=@(@{id='p204';result='notApplied'}, @{id='p300';result='notApplied'}, @{id='p301';result='notApplied'}) }
+                    )
+                }
+                $stateFile = Join-Path $dir 'state.json'
+                $state | ConvertTo-Json -Depth 12 | Set-Content $stateFile
+                $manifest = Join-Path $dir 'manifest.json'
+                @{  tenantId='tenant-abc'
+                    transition = @{ exitDate='2020-01-01'; groupId='g-transition'
+                                    groupEmptiedDate = $removedAt.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+                                    policyIds=@{}
+                                    verifiedRemovals=@(@{ upn='u1@contoso.com'; id='u1'; state='removed'
+                                                          attemptedAt=$removedAt.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+                                                          removedAt=$removedAt.ToString('yyyy-MM-ddTHH:mm:ss.fffZ') }) }
+                    objectIds = @{ groups=@{ 'SG-CA-Transition-Hybrid'='g-transition'; 'SG-CA-Users'='g-users' }
+                                   policies=@{ 'CA200-VCIO-Users-Windows-CompliantDevice'='p200'
+                                               'CA204-VCIO-Users-SessionHygiene-Unmanaged'='p204'
+                                               'CA300-VCIO-BYOD-BrowserSessionControls'='p300'
+                                               'CA301-VCIO-BYOD-Windows-RequireAppProtection'='p301' }
+                                   namedLocations=@{} }
+                } | ConvertTo-Json -Depth 12 | Set-Content $manifest
+                [pscustomobject]@{ Dir=$dir; StateFile=$stateFile; Manifest=$manifest }
+            }
+            function Invoke-Verify([object]$S) {
+                & pwsh -NoProfile -File $script:Harness -StateFile $S.StateFile -Manifest $S.Manifest -ScriptPath $script:Target *>&1 | Out-String
+            }
+            function Get-U1([object]$S) {
+                $mf = Get-Content -Raw $S.Manifest | ConvertFrom-Json
+                @($mf.transition.verifiedRemovals | Where-Object { $_.id -eq 'u1' })[0]
+            }
+        }
+
+        It 'POSITIVE: correct filters, all enabled, in scope -> verified' {
+            $s = New-VerifyScenario
+            try {
+                $out = Invoke-Verify $s
+                (Get-U1 $s).state | Should -Be 'verified'
+                $out | Should -Match 'VERIFIED'
+            } finally { Remove-Item -Recurse -Force $s.Dir -ErrorAction SilentlyContinue }
+        }
+
+        It 'a. CA300 filter in INCLUDE mode -> not verified, defect reported' {
+            $s = New-VerifyScenario -PolicyOverrides @{ p300 = @{ filterMode = 'include' } }
+            try {
+                $out = Invoke-Verify $s
+                (Get-U1 $s).state | Should -Not -Be 'verified'
+                $out | Should -Match 'CA300-VCIO-BYOD-BrowserSessionControls: no compliant-device exclude filter'
+                $out | Should -Match "mode 'include'"
+            } finally { Remove-Item -Recurse -Force $s.Dir -ErrorAction SilentlyContinue }
+        }
+
+        It 'b. CA204 rule is -eq False -> not verified' {
+            $s = New-VerifyScenario -PolicyOverrides @{ p204 = @{ filterRule = 'device.isCompliant -eq False' } }
+            try {
+                $out = Invoke-Verify $s
+                (Get-U1 $s).state | Should -Not -Be 'verified'
+                $out | Should -Match 'CA204-VCIO-Users-SessionHygiene-Unmanaged: no compliant-device exclude filter'
+            } finally { Remove-Item -Recurse -Force $s.Dir -ErrorAction SilentlyContinue }
+        }
+
+        It 'c. CA200 disabled between runs -> verification stops, no user marked' {
+            $s = New-VerifyScenario -PolicyOverrides @{ p200 = @{ state = 'disabled' } }
+            try {
+                $out = Invoke-Verify $s
+                (Get-U1 $s).state | Should -Be 'removed'      # untouched
+                $out | Should -Match 'NO user is marked verified'
+                $out | Should -Match "CA200-VCIO-Users-Windows-CompliantDevice is 'disabled'"
+            } finally { Remove-Item -Recurse -Force $s.Dir -ErrorAction SilentlyContinue }
+        }
+
+        It 'd. removed user missing from SG-CA-Users -> OUT OF SCOPE' {
+            $s = New-VerifyScenario -UserGroups @('g-somewhere-else')
+            try {
+                $out = Invoke-Verify $s
+                (Get-U1 $s).state | Should -Not -Be 'verified'
+                $out | Should -Match 'OUT OF SCOPE'
+                $out | Should -Match 'SG-CA-Users'
+            } finally { Remove-Item -Recurse -Force $s.Dir -ErrorAction SilentlyContinue }
+        }
+
+        It 'e. removed user in SG-CA-Excl-CA300 via a nested group -> OUT OF SCOPE' {
+            $s = New-VerifyScenario -UserGroups @('g-users','g-nested-team','g-excl-p300')
+            try {
+                $out = Invoke-Verify $s
+                (Get-U1 $s).state | Should -Not -Be 'verified'
+                $out | Should -Match 'OUT OF SCOPE'
+                $out | Should -Match 'CA300-VCIO-BYOD-BrowserSessionControls'
+            } finally { Remove-Item -Recurse -Force $s.Dir -ErrorAction SilentlyContinue }
+        }
+    }
+}
+
+# ==========================================================================
 Describe 'Finding 6B — removal state machine' {
 
     BeforeAll {

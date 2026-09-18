@@ -18,6 +18,28 @@
 
 Set-StrictMode -Version Latest
 
+function Test-VcioHasProperty {
+    <#
+    .SYNOPSIS Does this object carry a property of this name?
+    .DESCRIPTION `(Test-VcioHasProperty $o 'x')` looks harmless and
+    is not: under Set-StrictMode -Version Latest, accessing .Name on the
+    property collection of an object with ZERO properties throws
+    "The property 'Name' cannot be found on this object". An object with one or
+    more properties is fine, so the bug hides until a manifest section is left
+    empty — `"policyIds": {}` is exactly the shape that triggers it, and that
+    is a normal thing for a real manifest to contain. Enumerate instead.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowNull()]$InputObject,
+          [Parameter(Mandatory)][string]$Name)
+    if ($null -eq $InputObject) { return $false }
+    if ($InputObject -is [hashtable]) { return $InputObject.ContainsKey($Name) }
+    foreach ($prop in $InputObject.PSObject.Properties) {
+        if ($prop.Name -eq $Name) { return $true }
+    }
+    $false
+}
+
 # ============================================================ IP / CIDR
 # Named-location ranges are CIDR strings in both families. A v4 address must
 # never be compared against a v6 range, and the comparison is on the first
@@ -113,14 +135,14 @@ function Get-VcioNamedLocationRanges {
     # depending on the cmdlet and the API version in play.
     $ranges = $null
     foreach ($probe in 'IpRanges','ipRanges') {
-        if ($NamedLocation.PSObject.Properties.Name -contains $probe) { $ranges = $NamedLocation.$probe; break }
+        if ((Test-VcioHasProperty $NamedLocation $probe)) { $ranges = $NamedLocation.$probe; break }
     }
-    if (-not $ranges -and $NamedLocation.PSObject.Properties.Name -contains 'AdditionalProperties') {
+    if (-not $ranges -and (Test-VcioHasProperty $NamedLocation 'AdditionalProperties')) {
         $ap = $NamedLocation.AdditionalProperties
         if ($ap) {
             foreach ($probe in 'ipRanges','IpRanges') {
                 if ($ap -is [hashtable] -and $ap.ContainsKey($probe)) { $ranges = $ap[$probe]; break }
-                elseif ($ap.PSObject.Properties.Name -contains $probe) { $ranges = $ap.$probe; break }
+                elseif ((Test-VcioHasProperty $ap $probe)) { $ranges = $ap.$probe; break }
             }
         }
     }
@@ -132,7 +154,7 @@ function Get-VcioNamedLocationRanges {
             foreach ($k in 'cidrAddress','CidrAddress') { if ($r.ContainsKey($k)) { $cidr = $r[$k]; break } }
         } else {
             foreach ($k in 'CidrAddress','cidrAddress') {
-                if ($r.PSObject.Properties.Name -contains $k) { $cidr = $r.$k; break }
+                if ((Test-VcioHasProperty $r $k)) { $cidr = $r.$k; break }
             }
         }
         if ($cidr) { $out += [string]$cidr }
@@ -164,8 +186,8 @@ function Get-VcioGraphCollection {
             if ($resp.ContainsKey('value')) { $value = $resp['value'] }
             $next = if ($resp.ContainsKey('@odata.nextLink')) { $resp['@odata.nextLink'] } else { $null }
         } else {
-            if ($resp.PSObject.Properties.Name -contains 'value') { $value = $resp.value }
-            $next = if ($resp.PSObject.Properties.Name -contains '@odata.nextLink') { $resp.'@odata.nextLink' } else { $null }
+            if ((Test-VcioHasProperty $resp 'value')) { $value = $resp.value }
+            $next = if ((Test-VcioHasProperty $resp '@odata.nextLink')) { $resp.'@odata.nextLink' } else { $null }
         }
         foreach ($v in @($value)) { if ($null -ne $v) { $all += $v } }
     }
@@ -205,8 +227,8 @@ function Invoke-VcioAzGraphQuery {
         $skip += $rows.Count
 
         $token = $null
-        if ($batch -and $batch.PSObject.Properties.Name -contains 'SkipToken') { $token = $batch.SkipToken }
-        elseif ($rows.Count -and $rows[0].PSObject.Properties.Name -contains 'SkipToken') { $token = $rows[0].SkipToken }
+        if ($batch -and (Test-VcioHasProperty $batch 'SkipToken')) { $token = $batch.SkipToken }
+        elseif ($rows.Count -and (Test-VcioHasProperty $rows[0] 'SkipToken')) { $token = $rows[0].SkipToken }
         if (-not $token -and $rows.Count -lt $PageSize) { break }
     }
     if ($pages -ge $MaxPages) { throw "Resource Graph paging exceeded $MaxPages pages — refusing to report a partial result as complete." }
@@ -255,11 +277,11 @@ function Resolve-VcioObjectId {
         [scriptblock]$Fallback
     )
     $id = $null
-    if ($Manifest -and $Manifest.PSObject.Properties.Name -contains 'objectIds') {
+    if ($Manifest -and (Test-VcioHasProperty $Manifest 'objectIds')) {
         $section = $Manifest.objectIds
-        if ($section -and $section.PSObject.Properties.Name -contains $Kind) {
+        if ($section -and (Test-VcioHasProperty $section $Kind)) {
             $map = $section.$Kind
-            if ($map -and $map.PSObject.Properties.Name -contains $Name) {
+            if ($map -and (Test-VcioHasProperty $map $Name)) {
                 $candidate = [string]$map.$Name
                 # The example manifest ships all-zero placeholders; those are
                 # "not filled in", not an object id.
@@ -269,18 +291,18 @@ function Resolve-VcioObjectId {
     }
     # Transition policy IDs live under transition.policyIds, not objectIds.
     if (-not $id -and $Kind -eq 'policies' -and $Manifest -and
-        $Manifest.PSObject.Properties.Name -contains 'transition') {
+        (Test-VcioHasProperty $Manifest 'transition')) {
         $t = $Manifest.transition
-        if ($t -and $t.PSObject.Properties.Name -contains 'policyIds' -and $t.policyIds -and
-            $t.policyIds.PSObject.Properties.Name -contains $Name) {
+        if ($t -and (Test-VcioHasProperty $t 'policyIds') -and $t.policyIds -and
+            (Test-VcioHasProperty $t.policyIds $Name)) {
             $candidate = [string]$t.policyIds.$Name
             if ($candidate -and $candidate -notmatch '^0{8}-0{4}-0{4}-0{4}-0{12}$') { $id = $candidate }
         }
     }
     if (-not $id -and $Kind -eq 'groups' -and $Name -eq 'SG-CA-Transition-Hybrid' -and
-        $Manifest -and $Manifest.PSObject.Properties.Name -contains 'transition') {
+        $Manifest -and (Test-VcioHasProperty $Manifest 'transition')) {
         $t = $Manifest.transition
-        if ($t -and $t.PSObject.Properties.Name -contains 'groupId') {
+        if ($t -and (Test-VcioHasProperty $t 'groupId')) {
             $candidate = [string]$t.groupId
             if ($candidate -and $candidate -notmatch '^0{8}-0{4}-0{4}-0{4}-0{12}$') { $id = $candidate }
         }
@@ -424,12 +446,12 @@ function Test-VcioSignInsWithinFence {
     foreach ($s in $all) {
         $ip = $null
         foreach ($probe in 'IpAddress','ipAddress') {
-            if ($s.PSObject.Properties.Name -contains $probe) { $ip = [string]$s.$probe; break }
+            if ((Test-VcioHasProperty $s $probe)) { $ip = [string]$s.$probe; break }
         }
         $code = $null
-        if ($s.PSObject.Properties.Name -contains 'Status' -and $s.Status) {
+        if ((Test-VcioHasProperty $s 'Status') -and $s.Status) {
             foreach ($probe in 'ErrorCode','errorCode') {
-                if ($s.Status.PSObject.Properties.Name -contains $probe) { $code = $s.Status.$probe; break }
+                if ((Test-VcioHasProperty $s.Status $probe)) { $code = $s.Status.$probe; break }
             }
         }
         $succeeded = ($code -eq 0)
@@ -463,6 +485,99 @@ function Test-VcioSignInsWithinFence {
     $result
 }
 
+# The one device-filter string a standard policy may carry. Kept identical to
+# build/generate.py's FILTER_COMPLIANT; validator rule C5 pins the repo side.
+$script:VCIO_FILTER_COMPLIANT = 'device.isCompliant -eq True'
+
+function Test-VcioCompliantDeviceExcludeFilter {
+    <#
+    .SYNOPSIS Does this policy carry EXACTLY the compliant-device exclude filter?
+    .DESCRIPTION Finding 6A precondition 1. The whole notApplied acceptance
+    rests on this being the framework's filter and nothing else, so matching
+    the attribute NAME is not enough — `device.isCompliant -eq False` contains
+    it and means the opposite, and an include-mode filter with the same rule
+    inverts which devices the policy reaches.
+
+    Required: Mode is 'exclude' AND the rule, after whitespace normalisation,
+    equals FILTER_COMPLIANT. Include mode, -eq False, -ne, or any additional
+    clause means the policy does NOT carry the filter, and notApplied on it
+    never passes.
+
+    Comparison is case-insensitive after whitespace collapse. Every case the
+    brief names — include mode, False, -ne, extra clauses — differs by more
+    than casing, so this rejects all of them while not failing a tenant where
+    Graph echoed the rule with different capitalisation.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowNull()]$DeviceFilter)
+
+    if (-not $DeviceFilter) { return $false }
+    $mode = $null; $rule = $null
+    foreach ($probe in 'Mode','mode') {
+        if ((Test-VcioHasProperty $DeviceFilter $probe)) { $mode = [string]$DeviceFilter.$probe; break }
+    }
+    foreach ($probe in 'Rule','rule') {
+        if ((Test-VcioHasProperty $DeviceFilter $probe)) { $rule = [string]$DeviceFilter.$probe; break }
+    }
+    if ([string]::IsNullOrWhiteSpace($mode) -or [string]::IsNullOrWhiteSpace($rule)) { return $false }
+    if ($mode.Trim() -ine 'exclude') { return $false }
+
+    $normalised = ($rule -replace '\s+', ' ').Trim()
+    return ($normalised -ieq $script:VCIO_FILTER_COMPLIANT)
+}
+
+function Test-VcioUserInStandardScope {
+    <#
+    .SYNOPSIS Is this removed user actually inside all four standard policies?
+    .DESCRIPTION Finding 6A precondition 3. Accepting notApplied as evidence of
+    coverage assumes the policy would have reached the user at all. A user who
+    is not in SG-CA-Users, or who sits in one of the exclusion groups, gets
+    notApplied on every standard policy for a reason that has nothing to do
+    with device compliance — and the old rule would have marked them verified
+    and let the transition policies be disabled out from under them.
+
+    Membership is TRANSITIVE throughout: an exclusion inherited through a
+    nested group is still an exclusion, and it is the direction that produces a
+    false VERIFIED.
+
+    Checks, in order:
+      - transitive member of SG-CA-Users
+      - not named in excludeUsers of any of the four
+      - not a transitive member of any group in excludeGroups of any of the
+        four — SG-CA-BreakGlass, the SG-CA-Excl-CA2xx/3xx groups,
+        SG-CA-Transition-Hybrid itself, and anything a drifted tenant added
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$PrincipalId,
+        [Parameter(Mandatory)][AllowEmptyCollection()][AllowNull()][string[]]$TransitiveGroupIds,
+        [Parameter(Mandatory)][string]$UsersGroupId,
+        [Parameter(Mandatory)][AllowEmptyCollection()]$Policies
+    )
+    $groups = @(@($TransitiveGroupIds) | Where-Object { $_ })
+
+    if ($UsersGroupId -notin $groups) {
+        return [pscustomobject]@{ InScope = $false; Reason =
+            'not a transitive member of SG-CA-Users — the standard policies key on that group, so they would not reach this user whatever their device state.' }
+    }
+    foreach ($pol in @($Policies)) {
+        $excUsers = @(@($pol.ExcludeUsers) | Where-Object { $_ })
+        if ($PrincipalId -in $excUsers) {
+            return [pscustomobject]@{ InScope = $false; Reason =
+                "named directly in $($pol.DisplayName)'s excludeUsers." }
+        }
+    }
+    foreach ($pol in @($Policies)) {
+        $excGroups = @(@($pol.ExcludeGroups) | Where-Object { $_ })
+        $hit = @($groups | Where-Object { $_ -in $excGroups })
+        if ($hit.Count) {
+            return [pscustomobject]@{ InScope = $false; Reason =
+                "a transitive member of group $($hit[0]), which $($pol.DisplayName) excludes." }
+        }
+    }
+    [pscustomobject]@{ InScope = $true; Reason = 'in SG-CA-Users and excluded from none of the four.' }
+}
+
 function Get-VcioSignInClientCategory {
     <#
     .SYNOPSIS Map a sign-in's ClientAppUsed onto a CA clientAppTypes value.
@@ -474,7 +589,7 @@ function Get-VcioSignInClientCategory {
     param([Parameter(Mandatory)][AllowNull()][AllowEmptyString()]$SignIn)
     $used = $null
     foreach ($probe in 'ClientAppUsed','clientAppUsed') {
-        if ($SignIn -and $SignIn.PSObject.Properties.Name -contains $probe) { $used = [string]$SignIn.$probe; break }
+        if ($SignIn -and (Test-VcioHasProperty $SignIn $probe)) { $used = [string]$SignIn.$probe; break }
     }
     if ([string]::IsNullOrWhiteSpace($used)) { return 'unknown' }
     switch -Regex ($used) {
@@ -490,9 +605,9 @@ function Get-VcioSignInPlatform {
     [CmdletBinding()]
     param([Parameter(Mandatory)][AllowNull()]$SignIn)
     $os = $null
-    if ($SignIn -and $SignIn.PSObject.Properties.Name -contains 'DeviceDetail' -and $SignIn.DeviceDetail) {
+    if ($SignIn -and (Test-VcioHasProperty $SignIn 'DeviceDetail') -and $SignIn.DeviceDetail) {
         foreach ($probe in 'OperatingSystem','operatingSystem') {
-            if ($SignIn.DeviceDetail.PSObject.Properties.Name -contains $probe) { $os = [string]$SignIn.DeviceDetail.$probe; break }
+            if ((Test-VcioHasProperty $SignIn.DeviceDetail $probe)) { $os = [string]$SignIn.DeviceDetail.$probe; break }
         }
     }
     if ([string]::IsNullOrWhiteSpace($os)) { return 'unknown' }
@@ -570,7 +685,7 @@ function Test-VcioStandardCoverage {
     foreach ($s in @(@($SignIns) | Where-Object { $_ })) {
         $created = $null
         foreach ($probe in 'CreatedDateTime','createdDateTime') {
-            if ($s.PSObject.Properties.Name -contains $probe) { $created = $s.$probe; break }
+            if ((Test-VcioHasProperty $s $probe)) { $created = $s.$probe; break }
         }
         if ($null -eq $created) { continue }
         $when = if ($created -is [datetime]) { $created } else {
@@ -582,14 +697,14 @@ function Test-VcioStandardCoverage {
         $category = Get-VcioSignInClientCategory -SignIn $s
         $platform = Get-VcioSignInPlatform -SignIn $s
         $isCompliant = $false
-        if ($s.PSObject.Properties.Name -contains 'DeviceDetail' -and $s.DeviceDetail) {
+        if ((Test-VcioHasProperty $s 'DeviceDetail') -and $s.DeviceDetail) {
             foreach ($probe in 'IsCompliant','isCompliant') {
-                if ($s.DeviceDetail.PSObject.Properties.Name -contains $probe) { $isCompliant = [bool]$s.DeviceDetail.$probe; break }
+                if ((Test-VcioHasProperty $s.DeviceDetail $probe)) { $isCompliant = [bool]$s.DeviceDetail.$probe; break }
             }
         }
         $applied = $null
         foreach ($probe in 'AppliedConditionalAccessPolicies','appliedConditionalAccessPolicies') {
-            if ($s.PSObject.Properties.Name -contains $probe) { $applied = $s.$probe; break }
+            if ((Test-VcioHasProperty $s $probe)) { $applied = $s.$probe; break }
         }
         $stamp = $when.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 
@@ -602,15 +717,15 @@ function Test-VcioStandardCoverage {
             $matched++
 
             $entry = @(@($applied) | Where-Object { $_ -and (
-                ($_.PSObject.Properties.Name -contains 'Id' -and [string]$_.Id -eq [string]$pol.Id) -or
-                ($_.PSObject.Properties.Name -contains 'id' -and [string]$_.id -eq [string]$pol.Id)) }) | Select-Object -First 1
+                ((Test-VcioHasProperty $_ 'Id') -and [string]$_.Id -eq [string]$pol.Id) -or
+                ((Test-VcioHasProperty $_ 'id') -and [string]$_.id -eq [string]$pol.Id)) }) | Select-Object -First 1
             if (-not $entry) {
                 $failures.Add("$stamp $($pol.DisplayName) matched this sign-in ($category/$platform) but is absent from its applied-policies list — the policy did not evaluate for this user.")
                 continue
             }
             $res = $null
             foreach ($probe in 'Result','result') {
-                if ($entry.PSObject.Properties.Name -contains $probe) { $res = [string]$entry.$probe; break }
+                if ((Test-VcioHasProperty $entry $probe)) { $res = [string]$entry.$probe; break }
             }
             $r = if ($res) { $res.ToLowerInvariant() } else { '' }
 
@@ -649,8 +764,9 @@ function Test-VcioStandardCoverage {
     }
 }
 
-Export-ModuleMember -Function ConvertTo-VcioCidr, Test-VcioIpInRange, Test-VcioIpInRanges, Test-VcioIsParsableIp,
+Export-ModuleMember -Function Test-VcioHasProperty, ConvertTo-VcioCidr, Test-VcioIpInRange, Test-VcioIpInRanges, Test-VcioIsParsableIp,
     Get-VcioNamedLocationRanges, Get-VcioGraphCollection, Invoke-VcioAzGraphQuery,
     Assert-VcioTenantContext, Resolve-VcioObjectId, Test-VcioPermanentRoleAssignment,
     Test-VcioPrincipalInPolicyScope, Test-VcioSignInsWithinFence, Test-VcioStandardCoverage,
-    Get-VcioSignInClientCategory, Get-VcioSignInPlatform
+    Get-VcioSignInClientCategory, Get-VcioSignInPlatform,
+    Test-VcioCompliantDeviceExcludeFilter, Test-VcioUserInStandardScope

@@ -255,7 +255,7 @@ authorizationresources
             $body = $resp.Content | ConvertFrom-Json
             foreach ($v in @($body.value)) { if ($v) { $rows += $v } }
             $path = $null
-            if ($body.PSObject.Properties.Name -contains 'nextLink' -and $body.nextLink) {
+            if ((Test-VcioHasProperty $body 'nextLink') -and $body.nextLink) {
                 # nextLink is absolute; Invoke-AzRestMethod -Path wants the path.
                 $path = ([uri]$body.nextLink).PathAndQuery
             }
@@ -356,7 +356,7 @@ if ($incomplete.Count) {
 
 $clean = ($uncovered.Count -eq 0 -and $incomplete.Count -eq 0)
 if ($RecordResult) {
-    if (-not $mf.PSObject.Properties.Name.Contains('privilegedScopeLastRun')) {
+    if (-not (Test-VcioHasProperty $mf 'privilegedScopeLastRun')) {
         $mf | Add-Member -NotePropertyName privilegedScopeLastRun -NotePropertyValue ([pscustomobject]@{})
     }
     $mf.privilegedScopeLastRun = [pscustomobject]@{

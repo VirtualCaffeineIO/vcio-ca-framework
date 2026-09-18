@@ -169,13 +169,13 @@ function Save-Manifest([string]$What) {
 function Get-Entries { @($mf.transition.verifiedRemovals) | Where-Object { $_ } }
 function Set-Entries($Entries) { $mf.transition.verifiedRemovals = @($Entries) }
 function Get-EntryState($Entry) {
-    if ($Entry.PSObject.Properties.Name -contains 'state' -and $Entry.state) { return [string]$Entry.state }
+    if ((Test-VcioHasProperty $Entry 'state') -and $Entry.state) { return [string]$Entry.state }
     # Migrate an entry written by an earlier version.
-    if ($Entry.PSObject.Properties.Name -contains 'verified' -and $Entry.verified) { return 'verified' }
+    if ((Test-VcioHasProperty $Entry 'verified') -and $Entry.verified) { return 'verified' }
     'removed'
 }
 function Set-EntryProperty($Entry, [string]$Name, $Value) {
-    if ($Entry.PSObject.Properties.Name -contains $Name) { $Entry.$Name = $Value }
+    if ((Test-VcioHasProperty $Entry $Name)) { $Entry.$Name = $Value }
     else { $Entry | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force }
 }
 
@@ -300,27 +300,64 @@ if (-not $removals.Count) {
     exit 0
 }
 
-# Build the matching facts from the LIVE policies: clientAppTypes,
-# includePlatforms, and whether the policy carries the compliant-device
-# exclude filter. CA200 has no filter; CA204, CA300 and CA301 do, which is
-# exactly why notApplied means different things on them.
+# Finding 6A — accepting notApplied as evidence of coverage rests on three
+# facts. None of them can be taken from phase 1, which may have run days ago
+# and against a tenant that has since drifted. All three are established HERE,
+# from live state, at verification time.
+#
+#   1. each policy's filter is EXACTLY the framework's compliant-device
+#      exclude filter (not merely a rule mentioning the attribute),
+#   2. all four are 'enabled' right now,
+#   3. the removed user is actually inside all four's scope.
+#
+# Re-read the policies rather than reuse the collection fetched at startup.
+$policies = @(Get-MgIdentityConditionalAccessPolicy -All)
+
 $standardPolicies = @()
+$stateDefects = New-Object System.Collections.Generic.List[string]
 foreach ($n in $STANDARD_POLICIES) {
     $p = Resolve-Policy $n
-    if (-not $p) { continue }
-    $filterRule = $null
-    if ($p.Conditions.Devices -and $p.Conditions.Devices.DeviceFilter) { $filterRule = [string]$p.Conditions.Devices.DeviceFilter.Rule }
+    if (-not $p) {
+        $stateDefects.Add("$n is absent from the tenant.")
+        continue
+    }
+    # Precondition 2 — state at VERIFICATION time.
+    if ($p.State -ne 'enabled') {
+        $stateDefects.Add("$($p.DisplayName) is '$($p.State)', not 'enabled'. A notApplied result from a policy that is not enforcing proves nothing.")
+    }
+    $devFilter = $null
+    if ($p.Conditions.Devices) { $devFilter = $p.Conditions.Devices.DeviceFilter }
     $standardPolicies += [pscustomobject]@{
         Id                       = $p.Id
         DisplayName              = $p.DisplayName
         ClientAppTypes           = @($p.Conditions.ClientAppTypes)
         IncludePlatforms         = @(if ($p.Conditions.Platforms) { $p.Conditions.Platforms.IncludePlatforms } else { @() })
-        HasCompliantDeviceFilter = [bool]($filterRule -and $filterRule -match 'device\.isCompliant')
+        ExcludeGroups            = @(if ($p.Conditions.Users) { $p.Conditions.Users.ExcludeGroups } else { @() })
+        ExcludeUsers             = @(if ($p.Conditions.Users) { $p.Conditions.Users.ExcludeUsers }  else { @() })
+        # Precondition 1 — exact semantics, not a name match.
+        HasCompliantDeviceFilter = Test-VcioCompliantDeviceExcludeFilter -DeviceFilter $devFilter
+        FilterMode               = $(if ($devFilter) { [string]$devFilter.Mode } else { '(none)' })
+        FilterRule               = $(if ($devFilter) { [string]$devFilter.Rule } else { '(none)' })
     }
 }
-if ($standardPolicies.Count -ne $STANDARD_POLICIES.Count) {
-    Write-Log "STOPPED. Only $($standardPolicies.Count) of $($STANDARD_POLICIES.Count) standard policies resolved; cannot verify coverage against policies that are not there."
+if ($standardPolicies.Count -ne $STANDARD_POLICIES.Count -or $stateDefects.Count) {
+    Write-Log 'STOPPED. Standard-policy preconditions are not met; NO user is marked verified in this run:'
+    foreach ($d in $stateDefects) { Write-Log "  - CONFIGURATION DEFECT: $d" }
+    if ($standardPolicies.Count -ne $STANDARD_POLICIES.Count) {
+        Write-Log "  - only $($standardPolicies.Count) of $($STANDARD_POLICIES.Count) standard policies resolved."
+    }
+    Write-Log 'Transition policies stay ENABLED. Fix the above and re-run.'
     exit 1
+}
+
+# Report the filter facts, because they decide what notApplied means and a
+# silent change here would otherwise be invisible in the run log.
+foreach ($sp in $standardPolicies) {
+    if ($sp.HasCompliantDeviceFilter) {
+        Write-Log "  $($sp.DisplayName): compliant-device exclude filter present — notApplied is acceptable for a compliant device."
+    } else {
+        Write-Log "  $($sp.DisplayName): no compliant-device exclude filter (mode '$($sp.FilterMode)', rule '$($sp.FilterRule)') — notApplied on it never passes."
+    }
 }
 
 $unverified = New-Object System.Collections.Generic.List[string]
@@ -333,8 +370,8 @@ foreach ($r in $removals) {
         continue
     }
     # Tolerate a manifest written by an older version (removedDate, date-only).
-    $stampText = if ($r.PSObject.Properties.Name -contains 'removedAt' -and $r.removedAt) { $r.removedAt }
-                 elseif ($r.PSObject.Properties.Name -contains 'removedDate' -and $r.removedDate) { $r.removedDate }
+    $stampText = if ((Test-VcioHasProperty $r 'removedAt') -and $r.removedAt) { $r.removedAt }
+                 elseif ((Test-VcioHasProperty $r 'removedDate') -and $r.removedDate) { $r.removedDate }
                  else { $null }
     if (-not $stampText) {
         $unverified.Add("$($r.upn) — no removal timestamp recorded; cannot establish what counts as post-removal.")
@@ -342,6 +379,27 @@ foreach ($r in $removals) {
     }
     $removedAt = [datetime]::Parse($stampText, $null,
         [System.Globalization.DateTimeStyles]::AdjustToUniversal -bor [System.Globalization.DateTimeStyles]::AssumeUniversal)
+
+    # Precondition 3 — effective scope, BEFORE any sign-in is read. A user who
+    # is not in SG-CA-Users, or who sits in one of the exclusion groups, gets
+    # notApplied on every standard policy for a reason that has nothing to do
+    # with their device. Verifying them would disable the transition policies
+    # over a user no policy covers.
+    $userGroups = @()
+    try {
+        $userGroups = @(Get-MgUserTransitiveMemberOf -UserId $r.id -All -ErrorAction Stop | ForEach-Object { $_.Id })
+    } catch {
+        $unverified.Add("$($r.upn) — could not read transitive group membership: $($_.Exception.Message)")
+        continue
+    }
+    $scope = Test-VcioUserInStandardScope -PrincipalId $r.id -TransitiveGroupIds $userGroups `
+        -UsersGroupId $usersGroup.Id -Policies $standardPolicies
+    if (-not $scope.InScope) {
+        $unverified.Add("$($r.upn) — OUT OF SCOPE: $($scope.Reason) Never verified, whatever the device state.")
+        Write-Log "  OUT OF SCOPE $($r.upn) — $($scope.Reason)"
+        continue
+    }
+
     $since = $removedAt.ToString('yyyy-MM-ddTHH:mm:ssZ')
     $signIns = @()
     try {

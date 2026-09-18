@@ -26,15 +26,31 @@ Set-Item 'function:global:Get-MgContext'   { [pscustomobject]@{ TenantId = $glob
 Set-Item 'function:global:Get-MgIdentityConditionalAccessPolicy' {
     param($ConditionalAccessPolicyId, [switch]$All, $State, $ErrorAction)
     @($global:FakeState.policies) | ForEach-Object {
+        $pol = $_
         [pscustomobject]@{
-            Id = $_.id; DisplayName = $_.displayName; State = $_.state
+            Id = $pol.id; DisplayName = $pol.displayName; State = $pol.state
             Conditions = [pscustomobject]@{
-                ClientAppTypes = @($_.clientAppTypes)
-                Platforms = $(if ($_.includePlatforms) { [pscustomobject]@{ IncludePlatforms = @($_.includePlatforms) } } else { $null })
-                Devices   = $(if ($_.filterRule) { [pscustomobject]@{ DeviceFilter = [pscustomobject]@{ Rule = $_.filterRule } } } else { $null })
+                ClientAppTypes = @($pol.clientAppTypes)
+                Platforms = $(if ($pol.includePlatforms) { [pscustomobject]@{ IncludePlatforms = @($pol.includePlatforms) } } else { $null })
+                Devices   = $(if ($pol.filterRule) {
+                    [pscustomobject]@{ DeviceFilter = [pscustomobject]@{
+                        Mode = $(if ($pol.PSObject.Properties.Name -contains 'filterMode' -and $pol.filterMode) { $pol.filterMode } else { 'exclude' })
+                        Rule = $pol.filterRule } } } else { $null })
+                Users = [pscustomobject]@{
+                    ExcludeGroups = @($pol.excludeGroups)
+                    ExcludeUsers  = @($pol.excludeUsers)
+                }
             }
         }
     }
+} | Out-Null
+
+Set-Item 'function:global:Get-MgUserTransitiveMemberOf' {
+    param($UserId, [switch]$All, $ErrorAction)
+    $map = $global:FakeState.userGroups
+    $ids = @()
+    if ($map -and $map.PSObject.Properties.Name -contains $UserId) { $ids = @($map.$UserId) }
+    @($ids) | ForEach-Object { [pscustomobject]@{ Id = $_ } }
 } | Out-Null
 
 Set-Item 'function:global:Get-MgGroup' { param($Filter, $GroupId, [switch]$All, $ErrorAction) @() } | Out-Null
