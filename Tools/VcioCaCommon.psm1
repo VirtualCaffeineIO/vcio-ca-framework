@@ -40,6 +40,36 @@ function Test-VcioHasProperty {
     $false
 }
 
+function Get-VcioProp {
+    <#.SYNOPSIS Read a property that may not exist, without throwing.#>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowNull()]$InputObject,
+          [Parameter(Mandatory)][string]$Name,
+          $Default = $null)
+    if (-not (Test-VcioHasProperty $InputObject $Name)) { return $Default }
+    if ($InputObject -is [hashtable]) { return $InputObject[$Name] }
+    $InputObject.$Name
+}
+
+function Get-VcioPolicyName {
+    <#.SYNOPSIS A policy's DisplayName, or a readable stand-in if it has none.#>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowNull()]$Policy)
+    [string](Get-VcioProp $Policy 'DisplayName' '(unnamed policy)')
+}
+
+function Get-VcioPropCollection {
+    <#
+    .SYNOPSIS Read a collection property that may not exist.
+    .DESCRIPTION Callers MUST wrap in @(): a function returning an array has it
+    unrolled, so a one-element result would otherwise arrive as a bare scalar.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowNull()]$InputObject,
+          [Parameter(Mandatory)][string]$Name)
+    @(@((Get-VcioProp $InputObject $Name)) | Where-Object { $_ })
+}
+
 # ============================================================ IP / CIDR
 # Named-location ranges are CIDR strings in both families. A v4 address must
 # never be compared against a v6 range, and the comparison is on the first
@@ -82,13 +112,18 @@ function Test-VcioIpInRange {
     if (-not $Range) { return $false }
     $ip = $null
     if (-not [System.Net.IPAddress]::TryParse(($IpAddress -replace '^\[|\]$',''), [ref]$ip)) { return $false }
+    # A malformed range object is "not a match", not a crash.
+    $rangeAddress = Get-VcioProp $Range 'Address'
+    $rangeFamily  = Get-VcioProp $Range 'AddressFamily'
+    $rangePrefix  = Get-VcioProp $Range 'PrefixLength'
+    if (-not $rangeAddress -or $null -eq $rangeFamily -or $null -eq $rangePrefix) { return $false }
     # Never compare across families — a 4-byte address against a 16-byte range
     # would otherwise "match" on a byte prefix.
-    if ($ip.AddressFamily -ne $Range.AddressFamily) { return $false }
+    if ($ip.AddressFamily -ne $rangeFamily) { return $false }
 
     $a = $ip.GetAddressBytes()
-    $b = $Range.Address.GetAddressBytes()
-    $bitsLeft = $Range.PrefixLength
+    $b = $rangeAddress.GetAddressBytes()
+    $bitsLeft = $rangePrefix
     for ($i = 0; $i -lt $a.Length -and $bitsLeft -gt 0; $i++) {
         if ($bitsLeft -ge 8) {
             if ($a[$i] -ne $b[$i]) { return $false }
@@ -252,7 +287,10 @@ function Assert-VcioTenantContext {
     }
     $ctx = Get-MgContext
     if (-not $ctx) { throw 'No Microsoft Graph context. Connect-MgGraph first.' }
-    $actual = $ctx.TenantId
+    $actual = Get-VcioProp $ctx 'TenantId'
+    if ([string]::IsNullOrWhiteSpace([string]$actual)) {
+        throw 'The Microsoft Graph context carries no TenantId. Refusing to run: the connected tenant cannot be verified.'
+    }
     if ($actual -ne $ExpectedTenantId) {
         throw ("TENANT MISMATCH — connected to '$actual' but the manifest names '$ExpectedTenantId'. " +
                'Refusing to run. Nothing has been read or written.')
@@ -338,25 +376,25 @@ function Test-VcioPermanentRoleAssignment {
         return [pscustomobject]@{ Pass = $false; Reason =
             'No Global Administrator role-assignment schedule instances were returned at all. An empty result set is not evidence of a standing assignment.' }
     }
-    $mine = @($instances | Where-Object { $_.PrincipalId -eq $PrincipalId })
+    $mine = @($instances | Where-Object { (Get-VcioProp $_ 'PrincipalId') -eq $PrincipalId })
     if (-not $mine.Count) {
         return [pscustomobject]@{ Pass = $false; Reason = 'No Global Administrator assignment of any kind for this account.' }
     }
     $standing = @($mine | Where-Object {
-        $_.AssignmentType -eq 'Assigned' -and -not $_.EndDateTime
+        (Get-VcioProp $_ 'AssignmentType') -eq 'Assigned' -and -not (Get-VcioProp $_ 'EndDateTime')
     })
     if ($standing.Count) {
         return [pscustomobject]@{ Pass = $true; Reason = 'Standing (permanent) Global Administrator assignment.' }
     }
-    $activated = @($mine | Where-Object { $_.AssignmentType -eq 'Activated' })
+    $activated = @($mine | Where-Object { (Get-VcioProp $_ 'AssignmentType') -eq 'Activated' })
     if ($activated.Count) {
         return [pscustomobject]@{ Pass = $false; Reason =
             'Global Administrator is an ACTIVATED PIM eligibility, not a standing assignment. It appears in the role today and will not be there during the outage break-glass exists for.' }
     }
-    $expiring = @($mine | Where-Object { $_.AssignmentType -eq 'Assigned' -and $_.EndDateTime })
+    $expiring = @($mine | Where-Object { (Get-VcioProp $_ 'AssignmentType') -eq 'Assigned' -and (Get-VcioProp $_ 'EndDateTime') })
     if ($expiring.Count) {
         return [pscustomobject]@{ Pass = $false; Reason =
-            "Global Administrator assignment expires $($expiring[0].EndDateTime). Break-glass must not hold a time-bound assignment." }
+            "Global Administrator assignment expires $(Get-VcioProp $expiring[0] 'EndDateTime'). Break-glass must not hold a time-bound assignment." }
     }
     [pscustomobject]@{ Pass = $false; Reason = 'No standing Global Administrator assignment found.' }
 }
@@ -382,10 +420,10 @@ function Test-VcioPrincipalInPolicyScope {
         [Parameter(Mandatory)][AllowEmptyCollection()][AllowNull()][string[]]$TransitiveGroupIds
     )
     $groups = @(@($TransitiveGroupIds) | Where-Object { $_ })
-    $inc      = @(@($PolicyUsers.IncludeGroups) | Where-Object { $_ })
-    $exc      = @(@($PolicyUsers.ExcludeGroups) | Where-Object { $_ })
-    $excUsers = @(@($PolicyUsers.ExcludeUsers)  | Where-Object { $_ })
-    $incUsers = @(@($PolicyUsers.IncludeUsers)  | Where-Object { $_ })
+    $inc      = @(Get-VcioPropCollection $PolicyUsers 'IncludeGroups')
+    $exc      = @(Get-VcioPropCollection $PolicyUsers 'ExcludeGroups')
+    $excUsers = @(Get-VcioPropCollection $PolicyUsers 'ExcludeUsers')
+    $incUsers = @(Get-VcioPropCollection $PolicyUsers 'IncludeUsers')
 
     if ($PrincipalId -in $excUsers) {
         return [pscustomobject]@{ InScope = $false; Reason = 'Account is named directly in the policy''s excludeUsers.' }
@@ -576,17 +614,11 @@ function Test-VcioUserInStandardScope {
     $groups = @(@($TransitiveGroupIds) | Where-Object { $_ })
     $roles  = @(@($ActiveRoleIds)      | Where-Object { $_ })
 
-    # A policy object that simply lacks the property is treated as empty, not
-    # as an error. Reading $pol.IncludeUsers directly throws under StrictMode
-    # when the property is absent, which is the same trap as
-    # .PSObject.Properties.Name one level along.
-    # NOTE: every caller wraps this in @(). A function returning an array has
-    # it unrolled, so a one-element result arrives as a bare string and .Count
-    # on a string throws under StrictMode.
-    function Get-Coll($Object, [string]$Name) {
-        if (-not (Test-VcioHasProperty $Object $Name)) { return @() }
-        @(@($Object.$Name) | Where-Object { $_ })
-    }
+    # Policy objects may be partial. Collections come through
+    # Get-VcioPropCollection (callers wrap in @(); a returned array unrolls),
+    # and DisplayName through Get-VcioProp with a readable fallback so an
+    # unnamed policy produces a message rather than an exception.
+    function Get-Coll($Object, [string]$Name) { @(Get-VcioPropCollection $Object $Name) }
 
     function New-ScopeResult([string]$Status, [string]$Reason, [string]$PolicyName) {
         [pscustomobject]@{
@@ -604,8 +636,8 @@ function Test-VcioUserInStandardScope {
         $incR = @(Get-Coll $pol 'IncludeRoles')
         if (-not $incU.Count -and -not $incG.Count -and -not $incR.Count) {
             return New-ScopeResult 'Defect' `
-                "$($pol.DisplayName) has empty includeUsers, includeGroups and includeRoles — it targets nobody, so nothing it returns is evidence of coverage." `
-                $pol.DisplayName
+                "$(Get-VcioPolicyName $pol) has empty includeUsers, includeGroups and includeRoles — it targets nobody, so nothing it returns is evidence of coverage." `
+                (Get-VcioPolicyName $pol)
         }
     }
 
@@ -633,19 +665,19 @@ function Test-VcioUserInStandardScope {
             if ($incU.Count) { $why += "includes user(s) not matching this one" }
             if ($incR.Count) { $why += "includes role(s) $($incR -join ', '), none of which the user actively holds" }
             return New-ScopeResult 'OutOfScope' `
-                "$($pol.DisplayName) $($why -join '; ') — the policy does not reach this user." `
-                $pol.DisplayName
+                "$(Get-VcioPolicyName $pol) $($why -join '; ') — the policy does not reach this user." `
+                (Get-VcioPolicyName $pol)
         }
 
         $excUsers = @(Get-Coll $pol 'ExcludeUsers')
         if ($PrincipalId -in $excUsers) {
-            return New-ScopeResult 'OutOfScope' "named directly in $($pol.DisplayName)'s excludeUsers." $pol.DisplayName
+            return New-ScopeResult 'OutOfScope' "named directly in $(Get-VcioPolicyName $pol)'s excludeUsers." (Get-VcioPolicyName $pol)
         }
         $excGroups = @(Get-Coll $pol 'ExcludeGroups')
         $excHit = @($groups | Where-Object { $_ -in $excGroups })
         if ($excHit.Count) {
             return New-ScopeResult 'OutOfScope' `
-                "a transitive member of group $($excHit[0]), which $($pol.DisplayName) excludes." $pol.DisplayName
+                "a transitive member of group $($excHit[0]), which $(Get-VcioPolicyName $pol) excludes." (Get-VcioPolicyName $pol)
         }
     }
 
@@ -655,9 +687,9 @@ function Test-VcioUserInStandardScope {
         $incG = @(Get-Coll $pol 'IncludeGroups')
         if (('All' -in $incU) -or ($UsersGroupId -in $incG)) { continue }
         return New-ScopeResult 'Drift' `
-            ("$($pol.DisplayName) does not include SG-CA-Users ($UsersGroupId); it targets $(if ($incG.Count) { "group(s) $($incG -join ', ')" } else { 'something else' }) instead. " +
+            ("$(Get-VcioPolicyName $pol) does not include SG-CA-Users ($UsersGroupId); it targets $(if ($incG.Count) { "group(s) $($incG -join ', ')" } else { 'something else' }) instead. " +
              'The user is reached by it today, but the framework contract is that the standard policies target SG-CA-Users — this tenant has drifted and the exit cannot be verified against it.') `
-            $pol.DisplayName
+            (Get-VcioPolicyName $pol)
     }
 
     New-ScopeResult 'InScope' 'in SG-CA-Users, included by all four standard policies, and excluded by none.' ''
@@ -794,18 +826,18 @@ function Test-VcioStandardCoverage {
         $stamp = $when.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 
         foreach ($pol in @($Policies)) {
-            $types = @(@($pol.ClientAppTypes) | Where-Object { $_ })
-            $plats = @(@($pol.IncludePlatforms) | Where-Object { $_ })
+            $types = @(Get-VcioPropCollection $pol 'ClientAppTypes')
+            $plats = @(Get-VcioPropCollection $pol 'IncludePlatforms')
             $clientMatch   = (-not $types.Count) -or ('all' -in $types) -or ($category -in $types)
             $platformMatch = (-not $plats.Count) -or ('all' -in $plats) -or ($platform -in $plats)
             if (-not ($clientMatch -and $platformMatch)) { continue }
             $matched++
 
             $entry = @(@($applied) | Where-Object { $_ -and (
-                ((Test-VcioHasProperty $_ 'Id') -and [string]$_.Id -eq [string]$pol.Id) -or
-                ((Test-VcioHasProperty $_ 'id') -and [string]$_.id -eq [string]$pol.Id)) }) | Select-Object -First 1
+                ((Test-VcioHasProperty $_ 'Id') -and [string]$_.Id -eq [string](Get-VcioProp $pol 'Id')) -or
+                ((Test-VcioHasProperty $_ 'id') -and [string]$_.id -eq [string](Get-VcioProp $pol 'Id'))) }) | Select-Object -First 1
             if (-not $entry) {
-                $failures.Add("$stamp $($pol.DisplayName) matched this sign-in ($category/$platform) but is absent from its applied-policies list — the policy did not evaluate for this user.")
+                $failures.Add("$stamp $(Get-VcioPolicyName $pol) matched this sign-in ($category/$platform) but is absent from its applied-policies list — the policy did not evaluate for this user.")
                 continue
             }
             $res = $null
@@ -816,24 +848,24 @@ function Test-VcioStandardCoverage {
 
             if ($r -in @('success','failure')) { continue }
             if ($r -in $reportOnly) {
-                $defects.Add("$($pol.DisplayName) returned '$res' at $stamp — it is not enforcing. Phase 1 required all four standard policies to be 'enabled'; one has changed underneath the exit.")
-                $failures.Add("$stamp $($pol.DisplayName) result '$res' is report-only, not enforced.")
+                $defects.Add("$(Get-VcioPolicyName $pol) returned '$res' at $stamp — it is not enforcing. Phase 1 required all four standard policies to be 'enabled'; one has changed underneath the exit.")
+                $failures.Add("$stamp $(Get-VcioPolicyName $pol) result '$res' is report-only, not enforced.")
                 continue
             }
             if ($r -eq 'notapplied') {
-                if ($pol.HasCompliantDeviceFilter -and $isCompliant) {
+                if ((Get-VcioProp $pol 'HasCompliantDeviceFilter') -and $isCompliant) {
                     # Correct and expected: the compliant-device exclude filter
                     # took this device out of scope. That IS coverage working.
                     continue
                 }
-                if ($pol.HasCompliantDeviceFilter) {
-                    $failures.Add("$stamp $($pol.DisplayName) returned notApplied on a device that is not compliant — the exclude filter does not explain it.")
+                if (Get-VcioProp $pol 'HasCompliantDeviceFilter') {
+                    $failures.Add("$stamp $(Get-VcioPolicyName $pol) returned notApplied on a device that is not compliant — the exclude filter does not explain it.")
                 } else {
-                    $failures.Add("$stamp $($pol.DisplayName) returned notApplied and carries no compliant-device filter — the policy did not reach this user.")
+                    $failures.Add("$stamp $(Get-VcioPolicyName $pol) returned notApplied and carries no compliant-device filter — the policy did not reach this user.")
                 }
                 continue
             }
-            $failures.Add("$stamp $($pol.DisplayName) returned an unrecognised result '$res'.")
+            $failures.Add("$stamp $(Get-VcioPolicyName $pol) returned an unrecognised result '$res'.")
         }
     }
 
@@ -849,7 +881,7 @@ function Test-VcioStandardCoverage {
     }
 }
 
-Export-ModuleMember -Function Test-VcioHasProperty, ConvertTo-VcioCidr, Test-VcioIpInRange, Test-VcioIpInRanges, Test-VcioIsParsableIp,
+Export-ModuleMember -Function Test-VcioHasProperty, Get-VcioProp, Get-VcioPropCollection, Get-VcioPolicyName, ConvertTo-VcioCidr, Test-VcioIpInRange, Test-VcioIpInRanges, Test-VcioIsParsableIp,
     Get-VcioNamedLocationRanges, Get-VcioGraphCollection, Invoke-VcioAzGraphQuery,
     Assert-VcioTenantContext, Resolve-VcioObjectId, Test-VcioPermanentRoleAssignment,
     Test-VcioPrincipalInPolicyScope, Test-VcioSignInsWithinFence, Test-VcioStandardCoverage,
