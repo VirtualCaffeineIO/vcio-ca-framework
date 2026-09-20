@@ -150,6 +150,78 @@ Describe 'StrictMode sweep — case (b): single-element helper results' {
     }
 }
 
+Describe 'StrictMode sweep — case (a) yields the FAIL-SAFE verdict' {
+    # "No exception" is not the bar. A missing property must not resolve to a
+    # PASSING verdict — that would be worse than the crash it replaced, because
+    # a crash is visible and a false pass is not. Each assertion below pins the
+    # specific verdict and names the direction it pushes the caller in.
+
+    It '1 Test-VcioIpInRange: a malformed range is NOT-INSIDE, so a success from it reads as outside the fence' {
+        # $false = not inside. Test-VcioSignInsWithinFence then treats a
+        # successful sign-in from that IP as OutsideSuccess (FAIL) or, if the
+        # IP will not parse, UNVERIFIED. Never as evidence the fence held.
+        Test-VcioIpInRange -IpAddress '10.0.0.1' -Range ([pscustomobject]@{}) | Should -BeFalse
+    }
+
+    It '2 Test-VcioPermanentRoleAssignment: a partial instance is NOT a standing assignment' {
+        # Pass=$false -> the Ring 1 / SwitchReadiness break-glass check emits
+        # FAIL for that member. Break-glass is never assumed to hold GA.
+        $r = Test-VcioPermanentRoleAssignment -PrincipalId 'u1' -ScheduleInstances ([pscustomobject]@{})
+        $r.Pass   | Should -BeFalse
+        $r.Reason | Should -Match 'No Global Administrator assignment of any kind'
+    }
+
+    It '3 Test-VcioPrincipalInPolicyScope: an empty users block means the policy does NOT reach the account' {
+        # InScope=$false -> B3a reports "fence does not reach this account",
+        # which is a FAIL by name. A service account is never assumed fenced.
+        $r = Test-VcioPrincipalInPolicyScope -PrincipalId 'u1' -PolicyUsers ([pscustomobject]@{}) -TransitiveGroupIds @('g1')
+        $r.InScope | Should -BeFalse
+        $r.Reason  | Should -Match 'in none of the policy'
+    }
+
+    It '4 Test-VcioUserInStandardScope: a policy with no targeting is a DEFECT, not a pass' {
+        # Status=Defect, InScope=$false -> the transition exit reports a
+        # CONFIGURATION DEFECT and the user is never marked verified.
+        $r = Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g1') -UsersGroupId 'g1' -Policies ([pscustomobject]@{})
+        $r.Status  | Should -Be 'Defect'
+        $r.InScope | Should -BeFalse
+        $r.Reason  | Should -Match 'targets nobody'
+    }
+
+    It '5 Assert-VcioTenantContext: a context with no TenantId REFUSES to run' {
+        # A deliberate throw, before any read or write. The alternative — a
+        # $null TenantId comparing equal to a $null manifest value — would have
+        # silently approved an unverified tenant.
+        Mock Get-MgContext { [pscustomobject]@{} } -ModuleName VcioCaCommon
+        { Assert-VcioTenantContext -ExpectedTenantId 't1' } | Should -Throw '*carries no TenantId*'
+    }
+
+    It '6 Test-VcioStandardCoverage: an untargetable policy leaves the user UNVERIFIED' {
+        # Verified=$false -> the user stays unverified and the transition
+        # policies stay enabled, which is the safe state.
+        $sign = [pscustomobject]@{ CreatedDateTime = [datetime]'2026-01-02Z'; ClientAppUsed = 'Browser'
+            DeviceDetail = [pscustomobject]@{ OperatingSystem = 'Windows 10'; IsCompliant = $true }
+            AppliedConditionalAccessPolicies = @([pscustomobject]@{ Id = 'p1'; Result = 'success' }) }
+        $r = Test-VcioStandardCoverage -SignIns @($sign) -Policies ([pscustomobject]@{}) -RemovedAt ([datetime]'2026-01-01Z')
+        $r.Verified | Should -BeFalse
+        ($r.Failures -join ' ') | Should -Match 'absent from its applied-policies list'
+    }
+
+    It 'no empty-object case resolves to a passing verdict' {
+        # The blanket statement the six assertions above make individually.
+        # If a future change makes any of these return a pass, this fails even
+        # if the specific message above was edited.
+        $verdicts = @(
+            (Test-VcioIpInRange -IpAddress '10.0.0.1' -Range ([pscustomobject]@{})),
+            (Test-VcioPermanentRoleAssignment -PrincipalId 'u1' -ScheduleInstances ([pscustomobject]@{})).Pass,
+            (Test-VcioPrincipalInPolicyScope -PrincipalId 'u1' -PolicyUsers ([pscustomobject]@{}) -TransitiveGroupIds @('g1')).InScope,
+            (Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g1') -UsersGroupId 'g1' -Policies ([pscustomobject]@{})).InScope,
+            (Test-VcioStandardCoverage -SignIns @([pscustomobject]@{ CreatedDateTime = [datetime]'2026-01-02Z' }) -Policies ([pscustomobject]@{}) -RemovedAt ([datetime]'2026-01-01Z')).Verified
+        )
+        @($verdicts | Where-Object { $_ }).Count | Should -Be 0
+    }
+}
+
 Describe 'StrictMode sweep — coverage' {
     It 'every exported function is either swept or explicitly classified as taking no object' {
         # Held literally rather than derived from the case tables: those are
