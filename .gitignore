@@ -1,1 +1,8 @@
-# nothing to ignore — build/ is the source of truth
+# build/ is the source of truth for everything in Config/, Templates/ and
+# Transition/ — nothing generated is ignored.
+#
+# Deploy/ holds one subfolder per real deployment: the customer's manifest
+# (tenant IDs, exit dates, owners) and any instantiated templates that
+# build/generate.py --instance writes. Those never belong in the public repo.
+# The example manifest DOES ship, so ignore subfolders only, not the folder.
+Deploy/*/

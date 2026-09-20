@@ -24,7 +24,14 @@
     "times": null,
     "deviceStates": null,
     "devices": null,
-    "clientApplications": null,
+    "clientApplications": {
+      "@odata.type": "#microsoft.graph.conditionalAccessClientApplications",
+      "includeServicePrincipals": [],
+      "excludeServicePrincipals": [],
+      "includeAgentIdServicePrincipals": [
+        "All"
+      ]
+    },
     "agents": null,
     "applications": {
       "@odata.type": "#microsoft.graph.conditionalAccessApplications",

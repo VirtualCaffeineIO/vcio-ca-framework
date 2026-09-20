@@ -33,23 +33,7 @@
     "locations": null,
     "times": null,
     "deviceStates": null,
-    "devices": {
-      "@odata.type": "#microsoft.graph.conditionalAccessDevices",
-      "includeDeviceStates@odata.type": "#Collection(String)",
-      "includeDeviceStates": [],
-      "excludeDeviceStates@odata.type": "#Collection(String)",
-      "excludeDeviceStates": [],
-      "includeDevices@odata.type": "#Collection(String)",
-      "includeDevices": [],
-      "excludeDevices@odata.type": "#Collection(String)",
-      "excludeDevices": [],
-      "deviceFilter": {
-        "@odata.type": "#microsoft.graph.conditionalAccessFilter",
-        "mode@odata.type": "#microsoft.graph.filterMode",
-        "mode": "exclude",
-        "rule": "device.isCompliant -eq True -and device.deviceOwnership -eq \"Company\""
-      }
-    },
+    "devices": null,
     "clientApplications": null,
     "agents": null,
     "applications": {
@@ -93,6 +77,7 @@
     "operator": "OR",
     "builtInControls@odata.type": "#Collection(microsoft.graph.conditionalAccessGrantControl)",
     "builtInControls": [
+      "compliantDevice",
       "compliantApplication"
     ],
     "customAuthenticationFactors@odata.type": "#Collection(String)",
