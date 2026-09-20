@@ -468,11 +468,17 @@ Describe 'Finding 6A — the notApplied acceptance has preconditions' {
 
     Context 'precondition 3 — effective scope of the removed user' {
         BeforeAll {
+            function ScopePol {
+                param([string]$Name, [string[]]$IncGroups = @('g-users'), [string[]]$IncUsers = @(),
+                      [string[]]$IncRoles = @(), [string[]]$ExcGroups, [string[]]$ExcUsers = @())
+                [pscustomobject]@{ DisplayName=$Name; IncludeUsers=$IncUsers; IncludeGroups=$IncGroups
+                                   IncludeRoles=$IncRoles; ExcludeGroups=$ExcGroups; ExcludeUsers=$ExcUsers }
+            }
             $script:ScopePols = @(
-                [pscustomobject]@{ DisplayName='CA200'; ExcludeGroups=@('g-bg','g-excl-200','g-transition'); ExcludeUsers=@() }
-                [pscustomobject]@{ DisplayName='CA204'; ExcludeGroups=@('g-bg','g-excl-204','g-transition'); ExcludeUsers=@() }
-                [pscustomobject]@{ DisplayName='CA300'; ExcludeGroups=@('g-bg','g-excl-300','g-transition'); ExcludeUsers=@() }
-                [pscustomobject]@{ DisplayName='CA301'; ExcludeGroups=@('g-bg','g-excl-301','g-transition'); ExcludeUsers=@() }
+                ScopePol 'CA200' -ExcGroups @('g-bg','g-excl-200','g-transition')
+                ScopePol 'CA204' -ExcGroups @('g-bg','g-excl-204','g-transition')
+                ScopePol 'CA300' -ExcGroups @('g-bg','g-excl-300','g-transition')
+                ScopePol 'CA301' -ExcGroups @('g-bg','g-excl-301','g-transition')
             )
         }
         It 'a user in SG-CA-Users and no exclusion is in scope' {
@@ -492,15 +498,102 @@ Describe 'Finding 6A — the notApplied acceptance has preconditions' {
             $r.Reason  | Should -Match 'CA300'
         }
         It 'a user named in excludeUsers is out of scope' {
-            $pols = @([pscustomobject]@{ DisplayName='CA204'; ExcludeGroups=@(); ExcludeUsers=@('u1') })
+            $pols = @(ScopePol 'CA204' -ExcGroups @() -ExcUsers @('u1'))
             $r = Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users') `
                 -UsersGroupId 'g-users' -Policies $pols
             $r.InScope | Should -BeFalse
             $r.Reason  | Should -Match 'excludeUsers'
         }
+        It 'a policy object missing the Include/Exclude properties entirely does not throw' {
+            # Same StrictMode trap as .PSObject.Properties.Name, one level on:
+            # a caller passing a partial policy object must get a verdict, not
+            # a crash.
+            $partial = @([pscustomobject]@{ DisplayName='CA204' })
+            { Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users') `
+                -UsersGroupId 'g-users' -Policies $partial } | Should -Not -Throw
+            (Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users') `
+                -UsersGroupId 'g-users' -Policies $partial).Status | Should -Be 'Defect'
+        }
         It 'still in SG-CA-Transition-Hybrid is out of scope' {
             (Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users','g-transition') `
                 -UsersGroupId 'g-users' -Policies $script:ScopePols).InScope | Should -BeFalse
+        }
+
+        It 'a policy targeting a DIFFERENT group the user is not in is OUT OF SCOPE' {
+            $pols = @(
+                ScopePol 'CA200' -ExcGroups @()
+                ScopePol 'CA204' -ExcGroups @()
+                ScopePol 'CA300' -IncGroups @('g-somewhere-else') -ExcGroups @()
+                ScopePol 'CA301' -ExcGroups @()
+            )
+            $r = Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users') `
+                -UsersGroupId 'g-users' -Policies $pols
+            $r.Status     | Should -Be 'OutOfScope'
+            $r.PolicyName | Should -Be 'CA300'
+            $r.Reason     | Should -Match 'includes group\(s\) g-somewhere-else, of which the user is a member of none'
+        }
+
+        It 'a policy targeting another group the user IS in is DRIFT, not in scope' {
+            $pols = @(
+                ScopePol 'CA200' -ExcGroups @()
+                ScopePol 'CA204' -ExcGroups @()
+                ScopePol 'CA300' -IncGroups @('g-other-team') -ExcGroups @()
+                ScopePol 'CA301' -ExcGroups @()
+            )
+            $r = Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users','g-other-team') `
+                -UsersGroupId 'g-users' -Policies $pols
+            $r.Status     | Should -Be 'Drift'
+            $r.InScope    | Should -BeFalse
+            $r.PolicyName | Should -Be 'CA300'
+            $r.Reason     | Should -Match 'does not include SG-CA-Users'
+        }
+
+        It 'includeUsers All satisfies inclusion and the contract' {
+            $pols = @($script:ScopePols | ForEach-Object { $_ })
+            $pols[2] = ScopePol 'CA300' -IncGroups @() -IncUsers @('All') -ExcGroups @()
+            (Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users') `
+                -UsersGroupId 'g-users' -Policies $pols).Status | Should -Be 'InScope'
+        }
+
+        It 'includeUsers naming the user satisfies inclusion but not the contract' {
+            $pols = @($script:ScopePols | ForEach-Object { $_ })
+            $pols[2] = ScopePol 'CA300' -IncGroups @() -IncUsers @('u1') -ExcGroups @()
+            (Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users') `
+                -UsersGroupId 'g-users' -Policies $pols).Status | Should -Be 'Drift'
+        }
+
+        It 'an ACTIVE role the user holds satisfies inclusion' {
+            $pols = @($script:ScopePols | ForEach-Object { $_ })
+            $pols[2] = ScopePol 'CA300' -IncGroups @() -IncRoles @('role-abc') -ExcGroups @()
+            $r = Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users') `
+                -UsersGroupId 'g-users' -Policies $pols -ActiveRoleIds @('role-abc')
+            $r.Status | Should -Be 'Drift'     # included, but the contract still fails
+        }
+
+        It 'a role the user does NOT actively hold does not satisfy inclusion' {
+            $pols = @($script:ScopePols | ForEach-Object { $_ })
+            $pols[2] = ScopePol 'CA300' -IncGroups @() -IncRoles @('role-abc') -ExcGroups @()
+            $r = Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users') `
+                -UsersGroupId 'g-users' -Policies $pols -ActiveRoleIds @()
+            $r.Status | Should -Be 'OutOfScope'
+            $r.Reason | Should -Match 'none of which the user actively holds'
+        }
+
+        It 'a policy with all three include collections empty is a DEFECT' {
+            $pols = @($script:ScopePols | ForEach-Object { $_ })
+            $pols[1] = ScopePol 'CA204' -IncGroups @() -ExcGroups @()
+            $r = Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users') `
+                -UsersGroupId 'g-users' -Policies $pols
+            $r.Status     | Should -Be 'Defect'
+            $r.PolicyName | Should -Be 'CA204'
+            $r.Reason     | Should -Match 'targets nobody'
+        }
+
+        It 'exclusion still wins over inclusion' {
+            $r = Test-VcioUserInStandardScope -PrincipalId 'u1' -TransitiveGroupIds @('g-users','g-excl-301') `
+                -UsersGroupId 'g-users' -Policies $script:ScopePols
+            $r.Status     | Should -Be 'OutOfScope'
+            $r.PolicyName | Should -Be 'CA301'
         }
     }
 
@@ -529,6 +622,9 @@ Describe 'Finding 6A — the notApplied acceptance has preconditions' {
                     @{ id='p301'; displayName='CA301-VCIO-BYOD-Windows-RequireAppProtection'; state='enabled'; clientAppTypes=@('browser'); includePlatforms=@('windows'); filterRule='device.isCompliant -eq True'; filterMode='exclude' }
                 )
                 foreach ($d in $defs) {
+                    $d['includeUsers']  = @()
+                    $d['includeGroups'] = @('g-users')
+                    $d['includeRoles']  = @()
                     $d['excludeGroups'] = @('g-bg', "g-excl-$($d.id)", 'g-transition')
                     $d['excludeUsers']  = @()
                     if ($PolicyOverrides.ContainsKey($d.id)) {
@@ -539,7 +635,7 @@ Describe 'Finding 6A — the notApplied acceptance has preconditions' {
 
                 $state = @{
                     tenantId='tenant-abc'; usersGroupId='g-users'; members=@(); usersGroupMembers=@('u1')
-                    throwOn=@(); removeLog=@(); disabled=@(); policies=$defs
+                    throwOn=@(); removeLog=@(); disabled=@(); policies=$defs; roleAssignments=@()
                     userGroups = @{ u1 = $UserGroups }
                     signIns = @(
                         @{ createdDateTime = $removedAt.AddMinutes(60).ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
@@ -623,6 +719,32 @@ Describe 'Finding 6A — the notApplied acceptance has preconditions' {
                 (Get-U1 $s).state | Should -Not -Be 'verified'
                 $out | Should -Match 'OUT OF SCOPE'
                 $out | Should -Match 'SG-CA-Users'
+            } finally { Remove-Item -Recurse -Force $s.Dir -ErrorAction SilentlyContinue }
+        }
+
+        It 'f. CA300 targets a different group the user is NOT in -> OUT OF SCOPE naming CA300' {
+            $s = New-VerifyScenario -PolicyOverrides @{ p300 = @{ includeGroups = @('g-finance-only') } }
+            try {
+                $out = Invoke-Verify $s
+                (Get-U1 $s).state | Should -Not -Be 'verified'
+                $out | Should -Match 'OUT OF SCOPE'
+                $out | Should -Match 'CA300-VCIO-BYOD-BrowserSessionControls'
+                $out | Should -Match 'g-finance-only'
+                # the transition policies are untouched
+                (Get-Content -Raw $s.StateFile | ConvertFrom-Json).disabled.Count | Should -Be 0
+            } finally { Remove-Item -Recurse -Force $s.Dir -ErrorAction SilentlyContinue }
+        }
+
+        It 'g. CA300 targets another group the user IS in -> DRIFT, not verified' {
+            $s = New-VerifyScenario -PolicyOverrides @{ p300 = @{ includeGroups = @('g-other-team') } } `
+                                    -UserGroups @('g-users','g-other-team')
+            try {
+                $out = Invoke-Verify $s
+                (Get-U1 $s).state | Should -Not -Be 'verified'
+                $out | Should -Match 'DRIFT'
+                $out | Should -Match 'does not include SG-CA-Users'
+                $out | Should -Not -Match 'OUT OF SCOPE'
+                (Get-Content -Raw $s.StateFile | ConvertFrom-Json).disabled.Count | Should -Be 0
             } finally { Remove-Item -Recurse -Force $s.Dir -ErrorAction SilentlyContinue }
         }
 

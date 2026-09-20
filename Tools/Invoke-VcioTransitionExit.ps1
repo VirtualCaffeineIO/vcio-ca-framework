@@ -332,6 +332,9 @@ foreach ($n in $STANDARD_POLICIES) {
         DisplayName              = $p.DisplayName
         ClientAppTypes           = @($p.Conditions.ClientAppTypes)
         IncludePlatforms         = @(if ($p.Conditions.Platforms) { $p.Conditions.Platforms.IncludePlatforms } else { @() })
+        IncludeUsers             = @(if ($p.Conditions.Users) { $p.Conditions.Users.IncludeUsers }  else { @() })
+        IncludeGroups            = @(if ($p.Conditions.Users) { $p.Conditions.Users.IncludeGroups } else { @() })
+        IncludeRoles             = @(if ($p.Conditions.Users) { $p.Conditions.Users.IncludeRoles }  else { @() })
         ExcludeGroups            = @(if ($p.Conditions.Users) { $p.Conditions.Users.ExcludeGroups } else { @() })
         ExcludeUsers             = @(if ($p.Conditions.Users) { $p.Conditions.Users.ExcludeUsers }  else { @() })
         # Precondition 1 — exact semantics, not a name match.
@@ -348,6 +351,23 @@ if ($standardPolicies.Count -ne $STANDARD_POLICIES.Count -or $stateDefects.Count
     }
     Write-Log 'Transition policies stay ENABLED. Fix the above and re-run.'
     exit 1
+}
+
+# Active directory role assignments, fetched once. Needed because a policy may
+# target includeRoles, and a role assignment can land on a GROUP as well as a
+# user — so the lookup is by the user's id plus every group they are
+# transitively in. PIM-ELIGIBLE assignments are deliberately not read: an
+# unactivated eligibility does not put the user in a policy's scope.
+$roleAssignmentsByPrincipal = @{}
+try {
+    foreach ($ra in (Get-VcioGraphCollection -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?$top=999')) {
+        $pid_ = [string]$ra.principalId
+        if (-not $pid_) { continue }
+        if (-not $roleAssignmentsByPrincipal.ContainsKey($pid_)) { $roleAssignmentsByPrincipal[$pid_] = @() }
+        $roleAssignmentsByPrincipal[$pid_] += [string]$ra.roleDefinitionId
+    }
+} catch {
+    Write-Log "  NOTE: could not read directory role assignments ($($_.Exception.Message)). A policy targeting includeRoles cannot be evaluated; such a user will report OUT OF SCOPE rather than be assumed covered."
 }
 
 # Report the filter facts, because they decide what notApplied means and a
@@ -392,11 +412,26 @@ foreach ($r in $removals) {
         $unverified.Add("$($r.upn) — could not read transitive group membership: $($_.Exception.Message)")
         continue
     }
+    # Roles the user ACTIVELY holds, directly or through a group.
+    $activeRoles = @()
+    foreach ($principal in (@($r.id) + $userGroups)) {
+        if ($principal -and $roleAssignmentsByPrincipal.ContainsKey($principal)) {
+            $activeRoles += $roleAssignmentsByPrincipal[$principal]
+        }
+    }
+    $activeRoles = @($activeRoles | Select-Object -Unique)
+
     $scope = Test-VcioUserInStandardScope -PrincipalId $r.id -TransitiveGroupIds $userGroups `
-        -UsersGroupId $usersGroup.Id -Policies $standardPolicies
+        -UsersGroupId $usersGroup.Id -Policies $standardPolicies -ActiveRoleIds $activeRoles
     if (-not $scope.InScope) {
-        $unverified.Add("$($r.upn) — OUT OF SCOPE: $($scope.Reason) Never verified, whatever the device state.")
-        Write-Log "  OUT OF SCOPE $($r.upn) — $($scope.Reason)"
+        $label = switch ($scope.Status) {
+            'Drift'  { 'DRIFT' }
+            'Defect' { 'CONFIGURATION DEFECT' }
+            default  { 'OUT OF SCOPE' }
+        }
+        $unverified.Add("$($r.upn) — $($label): $($scope.Reason) Never verified in this state.")
+        Write-Log "  $label $($r.upn) — $($scope.Reason)"
+        if ($scope.Status -eq 'Defect') { $configDefects.Add("$($r.upn): $($scope.Reason)") }
         continue
     }
 

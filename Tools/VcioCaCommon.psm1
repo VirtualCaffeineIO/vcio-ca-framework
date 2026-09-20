@@ -528,54 +528,139 @@ function Test-VcioCompliantDeviceExcludeFilter {
 
 function Test-VcioUserInStandardScope {
     <#
-    .SYNOPSIS Is this removed user actually inside all four standard policies?
+    .SYNOPSIS Is this removed user EFFECTIVELY in scope of all four standard policies?
     .DESCRIPTION Finding 6A precondition 3. Accepting notApplied as evidence of
-    coverage assumes the policy would have reached the user at all. A user who
-    is not in SG-CA-Users, or who sits in one of the exclusion groups, gets
-    notApplied on every standard policy for a reason that has nothing to do
-    with device compliance — and the old rule would have marked them verified
-    and let the transition policies be disabled out from under them.
+    coverage assumes the policy would have reached the user at all. Checking
+    SG-CA-Users membership and the exclusions is not enough to establish that:
+    it never reads what each policy actually TARGETS. A policy whose
+    includeGroups points at some other group reaches nobody in SG-CA-Users, and
+    a user it does not reach returns notApplied on it for a reason that has
+    nothing to do with their device.
 
-    Membership is TRANSITIVE throughout: an exclusion inherited through a
-    nested group is still an exclusion, and it is the direction that produces a
-    false VERIFIED.
+    Inclusion is therefore evaluated per policy, explicitly:
 
-    Checks, in order:
-      - transitive member of SG-CA-Users
-      - not named in excludeUsers of any of the four
-      - not a transitive member of any group in excludeGroups of any of the
-        four — SG-CA-BreakGlass, the SG-CA-Excl-CA2xx/3xx groups,
-        SG-CA-Transition-Hybrid itself, and anything a drifted tenant added
+      INCLUDED by P when any of
+        - P.includeUsers contains 'All'
+        - P.includeUsers contains the user's object id
+        - P.includeGroups contains a group the user is a transitive member of
+        - P.includeRoles contains a role the user holds ACTIVELY (active
+          directory role assignments; PIM-eligible does not count, because an
+          unactivated eligibility does not put the user in the policy's scope)
+
+      IN SCOPE for P when INCLUDED and not excluded. The exclusion checks are
+      unchanged: excludeUsers by object id, excludeGroups by TRANSITIVE
+      membership, because an exclusion inherited through a nested group is
+      still an exclusion.
+
+    Effective standard scope requires being in scope for ALL FOUR.
+
+    Two more outcomes, neither of which verifies:
+
+      DEFECT  a policy with empty includeUsers, includeGroups AND includeRoles
+              targets nobody at all.
+      DRIFT   the user is effectively included, but the policy does not include
+              SG-CA-Users. That group is the framework's contract; a tenant
+              whose standard policies target something else has drifted, even
+              where this particular user happens to be in the other group.
+              Reported separately from OUT OF SCOPE because the remedy differs
+              — one is a membership problem, the other is a policy problem.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$PrincipalId,
         [Parameter(Mandatory)][AllowEmptyCollection()][AllowNull()][string[]]$TransitiveGroupIds,
         [Parameter(Mandatory)][string]$UsersGroupId,
-        [Parameter(Mandatory)][AllowEmptyCollection()]$Policies
+        [Parameter(Mandatory)][AllowEmptyCollection()]$Policies,
+        [AllowEmptyCollection()][AllowNull()][string[]]$ActiveRoleIds = @()
     )
     $groups = @(@($TransitiveGroupIds) | Where-Object { $_ })
+    $roles  = @(@($ActiveRoleIds)      | Where-Object { $_ })
 
+    # A policy object that simply lacks the property is treated as empty, not
+    # as an error. Reading $pol.IncludeUsers directly throws under StrictMode
+    # when the property is absent, which is the same trap as
+    # .PSObject.Properties.Name one level along.
+    # NOTE: every caller wraps this in @(). A function returning an array has
+    # it unrolled, so a one-element result arrives as a bare string and .Count
+    # on a string throws under StrictMode.
+    function Get-Coll($Object, [string]$Name) {
+        if (-not (Test-VcioHasProperty $Object $Name)) { return @() }
+        @(@($Object.$Name) | Where-Object { $_ })
+    }
+
+    function New-ScopeResult([string]$Status, [string]$Reason, [string]$PolicyName) {
+        [pscustomobject]@{
+            Status     = $Status
+            InScope    = ($Status -eq 'InScope')
+            Reason     = $Reason
+            PolicyName = $PolicyName
+        }
+    }
+
+    # ---- a policy that targets nobody is a defect, whoever the user is.
+    foreach ($pol in @($Policies)) {
+        $incU = @(Get-Coll $pol 'IncludeUsers')
+        $incG = @(Get-Coll $pol 'IncludeGroups')
+        $incR = @(Get-Coll $pol 'IncludeRoles')
+        if (-not $incU.Count -and -not $incG.Count -and -not $incR.Count) {
+            return New-ScopeResult 'Defect' `
+                "$($pol.DisplayName) has empty includeUsers, includeGroups and includeRoles — it targets nobody, so nothing it returns is evidence of coverage." `
+                $pol.DisplayName
+        }
+    }
+
+    # ---- the framework's contract on the user side.
     if ($UsersGroupId -notin $groups) {
-        return [pscustomobject]@{ InScope = $false; Reason =
-            'not a transitive member of SG-CA-Users — the standard policies key on that group, so they would not reach this user whatever their device state.' }
+        return New-ScopeResult 'OutOfScope' `
+            'not a transitive member of SG-CA-Users — the standard policies key on that group, so they would not reach this user whatever their device state.' `
+            ''
     }
+
+    # ---- per policy: included, then not excluded. First miss is reported.
     foreach ($pol in @($Policies)) {
-        $excUsers = @(@($pol.ExcludeUsers) | Where-Object { $_ })
+        $incU = @(Get-Coll $pol 'IncludeUsers')
+        $incG = @(Get-Coll $pol 'IncludeGroups')
+        $incR = @(Get-Coll $pol 'IncludeRoles')
+
+        $byAll   = ('All' -in $incU)
+        $byUser  = ($PrincipalId -in $incU)
+        $groupHit = @($groups | Where-Object { $_ -in $incG })
+        $roleHit  = @($roles  | Where-Object { $_ -in $incR })
+
+        if (-not ($byAll -or $byUser -or $groupHit.Count -or $roleHit.Count)) {
+            $why = @()
+            if ($incG.Count) { $why += "includes group(s) $($incG -join ', '), of which the user is a member of none" }
+            if ($incU.Count) { $why += "includes user(s) not matching this one" }
+            if ($incR.Count) { $why += "includes role(s) $($incR -join ', '), none of which the user actively holds" }
+            return New-ScopeResult 'OutOfScope' `
+                "$($pol.DisplayName) $($why -join '; ') — the policy does not reach this user." `
+                $pol.DisplayName
+        }
+
+        $excUsers = @(Get-Coll $pol 'ExcludeUsers')
         if ($PrincipalId -in $excUsers) {
-            return [pscustomobject]@{ InScope = $false; Reason =
-                "named directly in $($pol.DisplayName)'s excludeUsers." }
+            return New-ScopeResult 'OutOfScope' "named directly in $($pol.DisplayName)'s excludeUsers." $pol.DisplayName
+        }
+        $excGroups = @(Get-Coll $pol 'ExcludeGroups')
+        $excHit = @($groups | Where-Object { $_ -in $excGroups })
+        if ($excHit.Count) {
+            return New-ScopeResult 'OutOfScope' `
+                "a transitive member of group $($excHit[0]), which $($pol.DisplayName) excludes." $pol.DisplayName
         }
     }
+
+    # ---- the framework's contract on the policy side.
     foreach ($pol in @($Policies)) {
-        $excGroups = @(@($pol.ExcludeGroups) | Where-Object { $_ })
-        $hit = @($groups | Where-Object { $_ -in $excGroups })
-        if ($hit.Count) {
-            return [pscustomobject]@{ InScope = $false; Reason =
-                "a transitive member of group $($hit[0]), which $($pol.DisplayName) excludes." }
-        }
+        $incU = @(Get-Coll $pol 'IncludeUsers')
+        $incG = @(Get-Coll $pol 'IncludeGroups')
+        if (('All' -in $incU) -or ($UsersGroupId -in $incG)) { continue }
+        return New-ScopeResult 'Drift' `
+            ("$($pol.DisplayName) does not include SG-CA-Users ($UsersGroupId); it targets $(if ($incG.Count) { "group(s) $($incG -join ', ')" } else { 'something else' }) instead. " +
+             'The user is reached by it today, but the framework contract is that the standard policies target SG-CA-Users — this tenant has drifted and the exit cannot be verified against it.') `
+            $pol.DisplayName
     }
-    [pscustomobject]@{ InScope = $true; Reason = 'in SG-CA-Users and excluded from none of the four.' }
+
+    New-ScopeResult 'InScope' 'in SG-CA-Users, included by all four standard policies, and excluded by none.' ''
 }
 
 function Get-VcioSignInClientCategory {

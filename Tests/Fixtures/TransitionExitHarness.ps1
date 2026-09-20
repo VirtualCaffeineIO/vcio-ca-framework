@@ -37,12 +37,24 @@ Set-Item 'function:global:Get-MgIdentityConditionalAccessPolicy' {
                         Mode = $(if ($pol.PSObject.Properties.Name -contains 'filterMode' -and $pol.filterMode) { $pol.filterMode } else { 'exclude' })
                         Rule = $pol.filterRule } } } else { $null })
                 Users = [pscustomobject]@{
+                    IncludeUsers  = @($pol.includeUsers)
+                    IncludeGroups = @($pol.includeGroups)
+                    IncludeRoles  = @($pol.includeRoles)
                     ExcludeGroups = @($pol.excludeGroups)
                     ExcludeUsers  = @($pol.excludeUsers)
                 }
             }
         }
     }
+} | Out-Null
+
+Set-Item 'function:global:Invoke-MgGraphRequest' {
+    param($Method, $Uri, $Body, $ContentType, $ErrorAction)
+    if ($Uri -like '*roleManagement/directory/roleAssignments*') {
+        return @{ value = @($global:FakeState.roleAssignments | ForEach-Object {
+            @{ principalId = $_.principalId; roleDefinitionId = $_.roleDefinitionId } }) }
+    }
+    @{ value = @() }
 } | Out-Null
 
 Set-Item 'function:global:Get-MgUserTransitiveMemberOf' {
