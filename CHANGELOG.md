@@ -2,6 +2,10 @@
 
 Date-based versioning: `YYYY.M.R` (year, month, release-in-month).
 
+## 2026.9.1-rc1 (pre-release, untested against a tenant)
+
+> **Work in progress.** This is 2026.9.1 pre-release code. The policy redesign and tooling are complete and pass CI, but the live-tenant tests (device matrix, upgrade from 2026.7.1, agent policy enforcement, transition exit) have **NOT** been run. Fresh deployment only; no upgrade path is claimed. The last tested release is tag `2026.7.1`. Track lab status in [PR #1](https://github.com/VirtualCaffeineIO/vcio-ca-framework/pull/1).
+
 ## 2026.9.1 — 2026-09-11
 
 Closes the findings from the third external review pass. **Fresh deployment only** until the F2 upgrade test is recorded in [Docs/upgrade.md](Docs/upgrade.md).

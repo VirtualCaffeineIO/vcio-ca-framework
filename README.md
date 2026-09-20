@@ -1,3 +1,5 @@
+> **Work in progress.** This is 2026.9.1 pre-release code. The policy redesign and tooling are complete and pass CI, but the live-tenant tests (device matrix, upgrade from 2026.7.1, agent policy enforcement, transition exit) have **NOT** been run. Fresh deployment only; no upgrade path is claimed. The last tested release is tag `2026.7.1`. Track lab status in [PR #1](https://github.com/VirtualCaffeineIO/vcio-ca-framework/pull/1).
+
 # VCIO CA Framework
 
 A Conditional Access framework for Microsoft Entra ID, built on a simple thesis: **a baseline is an operating model, not a set of JSON files.** The policies here ship together with the exception governance, the deployment parameters, the identity-onboarding method, and the runbook that make them survivable in production — because the gap between "imported the policies" and "operates the policies" is where tenants actually get compromised or locked out.
