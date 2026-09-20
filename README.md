@@ -1,4 +1,4 @@
-> **Work in progress.** This is 2026.9.1 pre-release code. The policy redesign and tooling are complete and pass CI, but the live-tenant tests (device matrix, upgrade from 2026.7.1, agent policy enforcement, transition exit) have **NOT** been run. Fresh deployment only; no upgrade path is claimed. The last tested release is tag `2026.7.1`. Track lab status in [PR #1](https://github.com/VirtualCaffeineIO/vcio-ca-framework/pull/1).
+> **Work in progress.** This is 2026.9.1 pre-release code. The policy redesign and tooling are complete and pass CI, but the live-tenant tests (device matrix, upgrade from 2026.7.1, agent policy enforcement, transition exit) have **NOT** been run. For lab evaluation only. Neither fresh customer deployments nor upgrades have been validated against a live tenant. The previous release is tag `2026.7.1`. Track lab status in [PR #1](https://github.com/VirtualCaffeineIO/vcio-ca-framework/pull/1).
 
 # VCIO CA Framework
 
@@ -6,7 +6,7 @@ A Conditional Access framework for Microsoft Entra ID, built on a simple thesis:
 
 **Version 2026.9.1** · [Changelog](CHANGELOG.md) · Companion article series: virtualcaffeine.io (Phase 8)
 
-> **Fresh deployment only.** The 2026.9.1 upgrade path from 2026.7.1 has not been lab-validated — the F2 upgrade test needs a tenant holding the previous release and Windows PowerShell 5.1 for IntuneManagement. A tenant already running 2026.7.1 should stay there until the result is recorded in [Docs/upgrade.md](Docs/upgrade.md). New tenants are unaffected.
+> **Neither upgrades nor fresh deployments are validated.** The 2026.9.1 upgrade path from 2026.7.1 has not been lab-validated — the F2 upgrade test needs a tenant holding the previous release and Windows PowerShell 5.1 for IntuneManagement. A tenant already running 2026.7.1 should stay there until the result is recorded in [Docs/upgrade.md](Docs/upgrade.md). A fresh deployment is not a validated path either: no live-tenant test has been run at all, so a new tenant is for lab evaluation only.
 
 ## Design at a glance
 

@@ -4,11 +4,11 @@ Date-based versioning: `YYYY.M.R` (year, month, release-in-month).
 
 ## 2026.9.1-rc1 (pre-release, untested against a tenant)
 
-> **Work in progress.** This is 2026.9.1 pre-release code. The policy redesign and tooling are complete and pass CI, but the live-tenant tests (device matrix, upgrade from 2026.7.1, agent policy enforcement, transition exit) have **NOT** been run. Fresh deployment only; no upgrade path is claimed. The last tested release is tag `2026.7.1`. Track lab status in [PR #1](https://github.com/VirtualCaffeineIO/vcio-ca-framework/pull/1).
+> **Work in progress.** This is 2026.9.1 pre-release code. The policy redesign and tooling are complete and pass CI, but the live-tenant tests (device matrix, upgrade from 2026.7.1, agent policy enforcement, transition exit) have **NOT** been run. For lab evaluation only. Neither fresh customer deployments nor upgrades have been validated against a live tenant. The previous release is tag `2026.7.1`. Track lab status in [PR #1](https://github.com/VirtualCaffeineIO/vcio-ca-framework/pull/1).
 
 ## 2026.9.1 — 2026-09-11
 
-Closes the findings from the third external review pass. **Fresh deployment only** until the F2 upgrade test is recorded in [Docs/upgrade.md](Docs/upgrade.md).
+Closes the findings from the third external review pass. **For lab evaluation only** until the live-tenant tests are recorded — the F2 upgrade result in [Docs/upgrade.md](Docs/upgrade.md), and F1/F3 alongside it. Neither fresh deployments nor upgrades have been validated against a live tenant.
 
 ### Closure map
 
@@ -83,7 +83,7 @@ Work-order section → the external review finding it closes.
 * **D4** — new worksheet items: 6a (CA501 owner and deadline per account, or the recorded IP-fenced-without-allow-list decision), 6b (fencing mode), 14a (cross-tenant **inbound compliant-device trust** from the partner tenant, an organizational setting that is off by default), 15 (`SG-CA-Privileged` membership source), 16 (`SG-CA-Transition-Hybrid` membership and EXIT date). Item 13 gains a note on the OR-grant model for mobile. **Existing item numbers are immutable from this release onward** — completed customer worksheets reference them, so a new parameter takes a sub-letter under the item it extends or appends past the highest existing number, and never displaces one. The worksheet says so at the top of the table.
 * **D5** — new [Docs/partner-access.md](Docs/partner-access.md).
 * **D6** — onboarding.md records that CA004 gates WHfB and macOS Platform SSO registration, and that a TAP satisfies it.
-* **D7** — README: version, policy index, the gate model, the transition edition, the new template shape and the `--instance` flow, and the fresh-deployment-only notice.
+* **D7** — README: version, policy index, the gate model, the transition edition, the new template shape and the `--instance` flow, and the pre-release notice.
 * **D8** — this entry.
 * Also new: [Docs/upgrade.md](Docs/upgrade.md), holding the CA801 retirement procedure and the F2 checklist that is not yet ticked.
 

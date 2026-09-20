@@ -2,7 +2,7 @@
 
 Applies when a tenant already holds a previous version of the framework. A fresh tenant does not need this document — follow [implementation-guide.md](implementation-guide.md) instead.
 
-> **Status: the upgrade path for 2026.9.1 is not yet lab-validated.** The F2 upgrade test has not been run. Until its result is recorded in this document, **2026.9.1 is fresh-deployment only** and an existing 2026.7.1 tenant should stay on 2026.7.1.
+> **Status: the upgrade path for 2026.9.1 is not yet lab-validated.** The F2 upgrade test has not been run. Until its result is recorded in this document, an existing 2026.7.1 tenant should stay on 2026.7.1. Note that **2026.9.1 is for lab evaluation only** in any case: a fresh deployment is no more validated than an upgrade, because no live-tenant test has been run.
 
 ## Before anything
 
@@ -76,4 +76,4 @@ When it runs, record:
 - [ ] New Tier 0 instance created with a distinct exclusion group whose ID resolves through the MigrationTable to a real, separate tenant group — not a renamed one, not shared with any other policy
 - [ ] Rollback by re-importing the 2026.7.1 export
 
-Until every box is ticked here, the README says fresh deployment only.
+Until every box is ticked here, the README says lab evaluation only.
